@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+/*
+ * Preflight is disabled globally (to protect Ant Design), but Tailwind's
+ * `border-*` utilities only set border-WIDTH. Without a base reset the initial
+ * `border-style: none` / `border-width: medium` would make our borders either
+ * invisible or 3px thick. Re-apply preflight's border reset, but scoped to the
+ * component subtree so Ant Design's own (unlayered, later-injected) styles win.
+ */
+@layer base {
+  .sa-root,
+  .sa-root *,
+  .sa-root ::before,
+  .sa-root ::after {
+    border-width: 0;
+    border-style: solid;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes blink {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/*
+ * Approval Status: Ant Design Table bound to the design tokens. Scoped under
+ * .sa-root .sa-table so these rules out-specify antd's low-specificity
+ * `:where()` rules, and every color uses a CSS variable so the table re-themes
+ * automatically between Ant Light and Ant Dark.
+ */
+/*
+ * `!important` on the color-carrying properties: antd's generated theme rules
+ * out-specify these two for `background`/`border-color`, so without it the
+ * table would keep antd's light-theme fills even in Ant Dark. The values are
+ * CSS variables, so the table still re-themes automatically.
+ */
+.sa-root .sa-table .ant-table {
+  background: var(--surface) !important;
+  font-size: 13px;
+}
+.sa-root .sa-table .ant-table-thead > tr > th {
+  background: var(--surface2) !important;
+  color: var(--sub);
+  font-weight: 700;
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--line) !important;
+  padding: 10px 18px;
+}
+.sa-root .sa-table .ant-table-thead > tr > th::before {
+  display: none !important;
+}
+.sa-root .sa-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid var(--line) !important;
+  padding: 13px 18px;
+}
+.sa-root .sa-table .ant-table-tbody > tr:last-child > td {
+  border-bottom: none !important;
+}
+.sa-root .sa-table .ant-table-tbody > tr:hover > td {
+  background: var(--surface2) !important;
+}
+
+/* Hover helpers ported from the design's style-hover attributes */
+.sa-hover-accent:hover {
+  border-color: var(--accent) !important;
+}
+.sa-hover-bright:hover {
+  filter: brightness(0.94);
+}
+.sa-hover-brightf:hover {
+  filter: brightness(0.92);
+}
+.sa-hover-redsoft:hover {
+  background: var(--red-soft) !important;
+}
+.sa-hover-surface2:hover {
+  background: var(--surface2) !important;
+}
+.sa-hover-accent-text:hover {
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+.sa-hover-red-cell:hover {
+  background: var(--red-soft) !important;
+  color: var(--red) !important;
+}
