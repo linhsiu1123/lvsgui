@@ -2,9 +2,9 @@ import type { Config } from 'tailwindcss';
 
 const config: Config = {
   content: ['./app/**/*.{ts,tsx}', './components/**/*.{ts,tsx}'],
-  // Preflight is disabled so Tailwind's base reset does not fight Ant Design's
-  // CSS-in-JS styles or the design's own inline styling. Utilities still work.
-  corePlugins: { preflight: false },
+  // NOTE: Preflight used to be disabled here via `corePlugins`, which Tailwind v4
+  // removed. It is now disabled by not importing `tailwindcss/preflight.css` in
+  // app/globals.css — same intent: keep Tailwind's reset off Ant Design.
   theme: {
     extend: {
       fontFamily: {

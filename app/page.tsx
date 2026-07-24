@@ -25,6 +25,22 @@ export default function Page() {
           fontFamily:
             "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans TC','Noto Sans',sans-serif",
         },
+        components: {
+          // Approval Status table, themed via documented component tokens rather
+          // than `.ant-*` CSS overrides. Values are the design's CSS variables, so
+          // the table re-themes automatically between Ant Light and Ant Dark.
+          Table: {
+            colorBgContainer: 'var(--surface)',
+            headerBg: 'var(--surface2)',
+            headerColor: 'var(--sub)',
+            headerSplitColor: 'transparent',
+            borderColor: 'var(--line)',
+            rowHoverBg: 'var(--surface2)',
+            cellFontSize: 13,
+            cellPaddingBlock: 13,
+            cellPaddingInline: 18,
+          },
+        },
       }}
     >
       <ControlBar

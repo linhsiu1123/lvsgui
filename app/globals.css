@@ -1,6 +1,20 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+ * Tailwind v4 entry. Preflight is deliberately NOT imported (v4 dropped
+ * `corePlugins.preflight`) so Ant Design's own styles stay untouched — the same
+ * intent as the v3 `corePlugins: { preflight: false }` setting.
+ *
+ * Utilities are imported UNLAYERED on purpose. antd injects its CSS at runtime
+ * without a cascade layer, and unlayered CSS beats every layer — so putting
+ * utilities in `layer(utilities)` would let antd override Tailwind classes we
+ * apply to antd components (Avatar, Input, Select…). Unlayered keeps the v3
+ * cascade behaviour exactly.
+ */
+@layer theme, base, components;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css';
+
+@config '../tailwind.config.ts';
 
 * {
   box-sizing: border-box;
@@ -59,44 +73,6 @@ body {
   50% {
     opacity: 0.35;
   }
-}
-
-/*
- * Approval Status: Ant Design Table bound to the design tokens. Scoped under
- * .sa-root .sa-table so these rules out-specify antd's low-specificity
- * `:where()` rules, and every color uses a CSS variable so the table re-themes
- * automatically between Ant Light and Ant Dark.
- */
-/*
- * `!important` on the color-carrying properties: antd's generated theme rules
- * out-specify these two for `background`/`border-color`, so without it the
- * table would keep antd's light-theme fills even in Ant Dark. The values are
- * CSS variables, so the table still re-themes automatically.
- */
-.sa-root .sa-table .ant-table {
-  background: var(--surface) !important;
-  font-size: 13px;
-}
-.sa-root .sa-table .ant-table-thead > tr > th {
-  background: var(--surface2) !important;
-  color: var(--sub);
-  font-weight: 700;
-  font-size: 11.5px;
-  border-bottom: 1px solid var(--line) !important;
-  padding: 10px 18px;
-}
-.sa-root .sa-table .ant-table-thead > tr > th::before {
-  display: none !important;
-}
-.sa-root .sa-table .ant-table-tbody > tr > td {
-  border-bottom: 1px solid var(--line) !important;
-  padding: 13px 18px;
-}
-.sa-root .sa-table .ant-table-tbody > tr:last-child > td {
-  border-bottom: none !important;
-}
-.sa-root .sa-table .ant-table-tbody > tr:hover > td {
-  background: var(--surface2) !important;
 }
 
 /* Hover helpers ported from the design's style-hover attributes */

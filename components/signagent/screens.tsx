@@ -62,26 +62,31 @@ export function TopBar({ vals }: { vals: any }) {
 
 const pill = 'inline-block text-[11.5px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap';
 
+// antd exposes no header font-size/weight token, so the design's 11.5px/700
+// header is applied through the documented `title` ReactNode instead of a
+// `.ant-table-thead` CSS override. Colour comes from the `headerColor` token.
+const th = (label: string) => <span className="text-[11.5px] font-bold">{label}</span>;
+
 const dashColumns: ColumnsType<any> = [
   {
-    title: 'ID',
+    title: th('ID'),
     dataIndex: 'id',
     width: 96,
     render: (v: string) => <span className={`${mono} text-xs text-sub`}>{v}</span>,
   },
   {
-    title: 'Document',
+    title: th('Document'),
     dataIndex: 'title',
     render: (v: string) => <span className="font-medium">{v}</span>,
   },
   {
-    title: 'Product Type',
+    title: th('Product Type'),
     dataIndex: 'type',
     width: 150,
     render: (v: string) => <span className="text-sub">{v}</span>,
   },
   {
-    title: 'Risk',
+    title: th('Risk'),
     dataIndex: 'riskLabel',
     width: 104,
     render: (v: string, r: any) => (
@@ -91,7 +96,7 @@ const dashColumns: ColumnsType<any> = [
     ),
   },
   {
-    title: 'Status',
+    title: th('Status'),
     dataIndex: 'stLabel',
     width: 132,
     render: (v: string, r: any) => (
@@ -108,7 +113,7 @@ const dashColumns: ColumnsType<any> = [
     ),
   },
   {
-    title: 'Current Stage',
+    title: th('Current Stage'),
     dataIndex: 'stage',
     render: (v: string) => <span className="text-sub text-[12.5px]">{v}</span>,
   },
@@ -169,7 +174,7 @@ export function DashboardScreen({ vals }: { vals: any }) {
           )}
         </div>
         <Table
-          className="sa-table bg-surface border border-line rounded-lg overflow-hidden"
+          className="border border-line rounded-lg overflow-hidden"
           columns={dashColumns}
           dataSource={vals.dashRows}
           rowKey="id"
