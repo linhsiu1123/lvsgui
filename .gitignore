@@ -3,6 +3,11 @@
 /out
 /build
 /coverage
+
+# env / secrets
+.env
+.env*.local
+
 next-env.d.ts
 *.tsbuildinfo
 .DS_Store

@@ -1,0 +1,21 @@
+import 'next-auth';
+import 'next-auth/jwt';
+
+declare module 'next-auth' {
+  interface Session {
+    /** Keycloak access token, forwarded to the backend as a Bearer token. */
+    accessToken?: string;
+    /** Set to "RefreshAccessTokenError" when a silent refresh failed. */
+    error?: string;
+  }
+}
+
+declare module 'next-auth/jwt' {
+  interface JWT {
+    accessToken?: string;
+    refreshToken?: string;
+    /** Access-token expiry, epoch seconds. */
+    expiresAt?: number;
+    error?: string;
+  }
+}

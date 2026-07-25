@@ -16,7 +16,11 @@ const config = {
   collectCoverageFrom: [
     'components/**/*.{ts,tsx}',
     'app/**/*.{ts,tsx}',
+    'lib/**/*.ts',
+    'config/**/*.ts',
     '!app/layout.tsx',
+    '!app/providers.tsx',
+    '!app/api/**',
     '!**/*.d.ts',
   ],
   coverageReporters: ['text', 'text-summary', 'html', 'lcov'],

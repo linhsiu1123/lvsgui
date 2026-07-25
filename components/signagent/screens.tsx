@@ -52,7 +52,14 @@ export function TopBar({ vals }: { vals: any }) {
           <div className="font-medium text-[13px] leading-[1.2]">{vals.personaName}</div>
           <div className="text-[11px] text-sub leading-[1.2]">{vals.personaRole}</div>
         </div>
-        <Avatar className="bg-accent-soft text-accent font-bold text-sm" size={32}>
+        {/* antd sets its own background/colour on .ant-avatar, which beats
+            utility classes; inline style is the documented way to win without
+            reaching into `.ant-*` selectors. */}
+        <Avatar
+          size={32}
+          className="font-bold"
+          style={{ background: 'var(--accent-soft)', color: 'var(--accent)', fontSize: 14 }}
+        >
           {vals.personaInitial}
         </Avatar>
       </div>
@@ -446,7 +453,8 @@ export function ApproverScreen({ vals }: { vals: any }) {
                   value={vals.rejectReason}
                   onChange={vals.onRejectInput}
                   placeholder="Rejection reason (required)"
-                  className="flex-1 max-w-[480px] text-[13.5px]"
+                  className="flex-1 max-w-[480px]"
+                  style={{ fontSize: 13.5 }}
                 />
                 <button
                   onClick={vals.onRejectConfirm}
