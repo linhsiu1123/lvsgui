@@ -14,8 +14,10 @@ import {
   APPROVER_PERSONS,
   SKILL_DEFS,
   SKILL_NAMES,
+  NODE_SKILL_NAMES,
   STATUS_DEFS,
   TYPE_DEFS,
+  riskChip,
 } from './data';
 
 describe('theme tokens', () => {
@@ -78,7 +80,11 @@ describe('pre-review / suggestion / trace maps', () => {
 });
 
 describe('routing definitions', () => {
-  it('defines mid/high approval chains per product type', () => {
+  it('is keyed by pipeline, one per product type', () => {
+    expect(Object.keys(INITIAL_ROUTE_DEFS)).toEqual(TYPE_DEFS.map((t) => t.label));
+  });
+
+  it('defines mid/high approval chains per pipeline', () => {
     Object.values(INITIAL_ROUTE_DEFS).forEach((def) => {
       expect(def.mid.length).toBeGreaterThan(0);
       expect(def.high.length).toBeGreaterThanOrEqual(def.mid.length);
@@ -100,11 +106,25 @@ describe('skills + types', () => {
     SKILL_DEFS.forEach((d) => expect(SKILL_NAMES[d.key]).toBe(d.name));
   });
 
-  it('exposes the three product types', () => {
+  it('offers every skill but Anomaly Detection to flow nodes', () => {
+    expect(Object.keys(NODE_SKILL_NAMES)).toEqual(['route', 'precheck', 'auto']);
+    Object.entries(NODE_SKILL_NAMES).forEach(([k, name]) => expect(SKILL_NAMES[k]).toBe(name));
+  });
+
+  it('exposes the three product types and their pipelines', () => {
     expect(TYPE_DEFS.map((t) => t.name)).toEqual([
       'Rule Deck Change',
       'LVS Verification Report',
       'Waiver Request',
     ]);
+    expect(TYPE_DEFS.map((t) => t.label)).toEqual(['Pipeline1', 'Pipeline2', 'Pipeline3']);
+  });
+});
+
+describe('alert-type chips', () => {
+  it('leaves low risk unbadged and maps Medium/High to Warning/Error', () => {
+    expect(riskChip('Low').label).toBe('');
+    expect(riskChip('Medium')).toMatchObject({ label: 'Warning', fg: RISK.Medium.fgVar });
+    expect(riskChip('High')).toMatchObject({ label: 'Error', fg: RISK.High.fgVar });
   });
 });

@@ -89,23 +89,25 @@ const dashColumns: ColumnsType<any> = [
   {
     title: th('Product Type'),
     dataIndex: 'type',
-    width: 150,
+    width: 124,
     render: (v: string) => <span className="text-sub">{v}</span>,
   },
   {
-    title: th('Risk'),
+    // Low risk is the norm and carries no badge, so the cell is often empty.
+    title: th('Alert Type'),
     dataIndex: 'riskLabel',
-    width: 104,
-    render: (v: string, r: any) => (
-      <span className={`${pill} px-2`} style={{ background: r.riskBg, color: r.riskFg }}>
-        {v}
-      </span>
-    ),
+    width: 88,
+    render: (v: string, r: any) =>
+      v ? (
+        <span className={`${pill} px-2`} style={{ background: r.riskBg, color: r.riskFg }}>
+          {v}
+        </span>
+      ) : null,
   },
   {
     title: th('Status'),
     dataIndex: 'stLabel',
-    width: 132,
+    width: 120,
     render: (v: string, r: any) => (
       <Tooltip title={r.stTitle}>
         <span
@@ -137,7 +139,7 @@ export function DashboardScreen({ vals }: { vals: any }) {
         <div className="grid grid-cols-3 gap-3.5">
           {vals.dashTypes.map((dt: any) => (
             <div
-              key={dt.name}
+              key={dt.key}
               onClick={dt.pick}
               className="sa-hover-accent cursor-pointer bg-surface rounded-lg p-[18px] border-[1.5px]"
               style={{ borderColor: dt.border }}
@@ -570,19 +572,25 @@ export function RoutingScreen({ vals }: { vals: any }) {
       <div className="relative border border-line rounded-lg overflow-hidden bg-surface2">
         <div
           onClick={vals.routeCanvasClick}
-          className="overflow-auto h-[560px] transition-opacity duration-200"
+          className="overflow-auto max-h-[560px] transition-opacity duration-200"
           style={{ opacity: vals.routeCanvasOpacity }}
         >
           <div
-            className="w-[1370px] h-[540px] relative"
+            className="relative"
             style={{
+              width: vals.flowCanvasW,
+              height: vals.flowCanvasH,
               transform: `scale(${vals.routeZoom})`,
               transformOrigin: '0 0',
               backgroundImage: 'radial-gradient(circle, var(--line) 1.1px, transparent 1.1px)',
               backgroundSize: '18px 18px',
             }}
           >
-            <svg width="1370" height="540" className="absolute inset-0 pointer-events-none">
+            <svg
+              width={vals.flowCanvasW}
+              height={vals.flowCanvasH}
+              className="absolute inset-0 pointer-events-none"
+            >
               {vals.flowEdges.map((fe: any) => (
                 <g key={fe.id}>
                   <path d={fe.d} style={{ fill: 'none', stroke: fe.stroke, strokeWidth: fe.w }} />
@@ -655,6 +663,14 @@ export function RoutingScreen({ vals }: { vals: any }) {
             −
           </button>
           <span className="text-[11px] text-sub min-w-[38px] text-center">{vals.routeZoomPct}</span>
+          <span className="w-px h-4 bg-line mx-0.5" />
+          <button
+            onClick={vals.routeAddNode}
+            title="Add node"
+            className="sa-hover-accent-soft cursor-pointer border-none bg-transparent text-[11.5px] font-bold text-accent h-6 px-2 rounded-md whitespace-nowrap"
+          >
+            ＋ Node
+          </button>
           <button
             onClick={vals.routeZoomIn}
             title="Zoom in"
@@ -678,8 +694,8 @@ export function RoutingScreen({ vals }: { vals: any }) {
 function RoutePanel({ vals }: { vals: any }) {
   return (
     <div
-      className="absolute top-3.5 right-3.5 w-[272px] bg-surface border border-line rounded-lg shadow-[0_6px_16px_0_rgba(0,0,0,0.08),0_3px_6px_-4px_rgba(0,0,0,0.12),0_9px_28px_8px_rgba(0,0,0,0.05)]"
-      style={{ animation: 'fadeUp .18s ease' }}
+      className="absolute w-[272px] bg-surface border border-line rounded-lg shadow-[0_6px_16px_0_rgba(0,0,0,0.08),0_3px_6px_-4px_rgba(0,0,0,0.12),0_9px_28px_8px_rgba(0,0,0,0.05)]"
+      style={{ top: vals.routePanelTop, left: vals.routePanelLeft, animation: 'fadeUp .18s ease' }}
     >
       <div className="flex items-center gap-2 px-3.5 py-3 border-b border-line">
         <div className="min-w-0 flex-1">
@@ -703,6 +719,20 @@ function RoutePanel({ vals }: { vals: any }) {
                 <span className="min-w-0 font-medium" style={{ color: pr.fg }}>
                   {pr.v}
                 </span>
+              </div>
+            );
+          if (pr.isInput)
+            return (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <span className="flex-none w-16 text-sub">{pr.k}</span>
+                <Input
+                  value={pr.value}
+                  onChange={pr.change}
+                  spellCheck={false}
+                  size="small"
+                  className="flex-1 min-w-0"
+                  style={{ fontSize: 12 }}
+                />
               </div>
             );
           if (pr.isSel)

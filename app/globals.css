@@ -91,6 +91,9 @@ body {
 .sa-hover-surface2:hover {
   background: var(--surface2) !important;
 }
+.sa-hover-accent-soft:hover {
+  background: var(--accent-soft) !important;
+}
 .sa-hover-accent-text:hover {
   color: var(--accent) !important;
   border-color: var(--accent) !important;

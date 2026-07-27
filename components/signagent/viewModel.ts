@@ -1,15 +1,19 @@
 import React from 'react';
 import {
-  RISK,
   PRECHECKS,
   SUGGESTIONS,
   TRACES,
   STATUS_DEFS,
   TYPE_DEFS,
   SKILL_DEFS,
-  SKILL_NAMES,
-  APPROVER_TITLES,
-  APPROVER_PERSONS,
+  NODE_SKILL_NAMES,
+  DEFAULT_CHAIN,
+  NODE_W,
+  NODE_GAP,
+  NODE_X0,
+  NODE_Y,
+  RISK_LABEL,
+  riskChip,
   type CaseItem,
   type RouteDef,
 } from './data';
@@ -72,7 +76,8 @@ export function buildVals(
     }));
     const nonzero = counts.filter((x) => x.count > 0);
     return {
-      name: t.name,
+      key: t.name,
+      name: t.label,
       glyph: t.glyph,
       total: String(list.length),
       border: s.dashType === t.name ? 'var(--accent)' : 'var(--line)',
@@ -91,9 +96,7 @@ export function buildVals(
     .filter((c) => !s.dashType || c.type === s.dashType)
     .map((c) => {
       const sd = statusDefs.find((x) => x[0] === c.status)!;
-      const rb = showRisk
-        ? { label: `${c.risk} Risk`, bg: RISK[c.risk].bgVar, fg: RISK[c.risk].fgVar }
-        : { label: '—', bg: 'transparent', fg: 'var(--sub)' };
+      const rb = showRisk ? riskChip(c.risk) : { label: '—', bg: 'transparent', fg: 'var(--sub)' };
       return {
         id: c.id,
         title: `${c.title} ${c.ver}`,
@@ -113,9 +116,7 @@ export function buildVals(
   // ---- approver ----
   const pendingMine = cases.filter((c) => c.status === 'pending' && c.routeIdx === 0 && !c.currentLevel2);
   const riskBadge = (r: CaseItem['risk']) =>
-    showRisk
-      ? { label: `${r} Risk`, bg: RISK[r].bgVar, fg: RISK[r].fgVar }
-      : { label: '', bg: 'transparent', fg: 'transparent' };
+    showRisk ? riskChip(r) : { label: '', bg: 'transparent', fg: 'transparent' };
   const approverCases = pendingMine.map((c) => {
     const rb = riskBadge(c.risk);
     return {
@@ -213,7 +214,7 @@ export function buildVals(
     ...modalVals(s, setState, cases, statusDefs, showRisk),
     ...feedVals(s),
     dashFiltered: !!s.dashType,
-    dashFilterLabel: s.dashType || 'All types',
+    dashFilterLabel: TYPE_DEFS.find((t) => t.name === s.dashType)?.label || s.dashType || 'All types',
     dashClear: () => setState({ dashType: null }),
 
     // approver
@@ -272,9 +273,7 @@ function modalVals(
   const close = () => setState({ dashModal: null });
   if (!c) return { dashModalOpen: false, dashModalClose: close };
   const sd = statusDefs.find((x) => x[0] === c.status)!;
-  const rb = showRisk
-    ? { label: `${c.risk} Risk`, bg: RISK[c.risk].bgVar, fg: RISK[c.risk].fgVar }
-    : { label: '—', bg: 'var(--surface2)', fg: 'var(--sub)' };
+  const rb = showRisk ? riskChip(c.risk) : { label: '—', bg: 'var(--surface2)', fg: 'var(--sub)' };
   const isAuto = c.status === 'auto';
   const G = 'var(--green)',
     Gs = 'var(--green-soft)',
@@ -292,8 +291,8 @@ function modalVals(
     fw: st === 'current' ? 700 : 500,
   });
   const branchDesc = isAuto
-    ? 'Low Risk → Agent Auto-approve'
-    : `${c.risk} Risk → ${c.route.length} levels of manual approval`;
+    ? 'Low risk → Agent Auto-approve'
+    : `${RISK_LABEL[c.risk]} → ${c.route.length} levels of manual approval`;
   const steps = [
     mkStep('Document Submitted', `${c.submitter} · ${c.time}`, 'done'),
     mkStep('Agent Pre-review', 'format · attachments · linked ECO', 'done'),
@@ -327,12 +326,14 @@ function modalVals(
     modalStBg: sd[3],
     modalRuleLabel: `${c.type} routing`,
     modalRuleDesc: branchDesc,
+    // Deep-link to the pipeline that handles this document type. Flows are
+    // keyed by pipeline label, so the doc type has to be mapped across.
     modalGoRoutes: () =>
       setState({
         dashModal: null,
         role: 'routes',
-        routeTab: c.type,
-        routeSel: isAuto ? 'auto' : 'sw',
+        routeTab: TYPE_DEFS.find((t) => t.name === c.type)?.label ?? c.type,
+        routeSel: null,
         routeEdgeSel: null,
       }),
     modalSteps: withLines,
@@ -375,54 +376,33 @@ function routeVals(
 ): any {
   const tab = s.routeTab;
   const on = s.routeOn[tab];
-  const G = 'var(--green)',
-    A = 'var(--amber)',
-    R = 'var(--red)';
-  const GS = 'var(--green-soft)',
-    AS = 'var(--amber-soft)',
-    RS = 'var(--red-soft)';
+  const G = 'var(--green)';
 
   const defs = s.routeDefs;
   const D = defs[tab];
-  const T = APPROVER_TITLES;
-  const P = APPROVER_PERSONS;
-  const optList = Object.keys(T).map((k) => ({ v: k, label: T[k] }));
   const now = new Date();
   const today = `${now.getMonth() + 1}/${String(now.getDate()).padStart(2, '0')}`;
   const bump = (m: string) => m.replace(/updated [\d/]+|created today/, `updated ${today}`);
-  const setChain = (branch: 'mid' | 'high', mut: (arr: string[]) => void) =>
-    setState((st) => {
-      const d = st.routeDefs[tab];
-      const arr = [...(d[branch] as string[])];
-      mut(arr);
-      if (!arr.length) return {};
-      return { routeDefs: { ...st.routeDefs, [tab]: { ...d, [branch]: arr, meta: bump(d.meta) } } };
-    });
 
-  const skillOpts = [{ v: '', label: '— None —' }, ...Object.keys(SKILL_NAMES).map((k) => ({ v: k, label: SKILL_NAMES[k] }))];
-  const defaultNodeSkill: Record<string, string> = { a: 'precheck', sw: 'route', auto: 'auto' };
-  const setNodeSkill = (id: string, key: string) =>
-    setState((st) => ({ nodeSkills: { ...st.nodeSkills, [id]: key } }));
-  const skillRow = (id: string) => {
-    const val = s.nodeSkills && s.nodeSkills[id] !== undefined ? s.nodeSkills[id] : defaultNodeSkill[id] || '';
-    return {
-      isSel: true,
-      k: 'Skill',
-      options: skillOpts,
-      value: val,
-      change: (e: any) => setNodeSkill(id, e.target.value),
-    };
-  };
-  const defaultVerify: Record<string, boolean> = { t: false, a: false, sw: false, auto: false, rev: true };
-  const verifyKey = (id: string) => `${tab}:${id}`;
-  const verifyOn = (id: string) => {
-    const k = verifyKey(id);
-    return s.nodeVerify && s.nodeVerify[k] !== undefined
-      ? s.nodeVerify[k]
-      : defaultVerify[id] !== undefined
-        ? defaultVerify[id]
-        : true;
-  };
+  // Per-node settings are scoped to the pipeline, so two flows can name their
+  // nodes alike without sharing skill/verify configuration.
+  const nodeKey = (id: string) => `${tab}:${id}`;
+
+  const skillOpts = [
+    { v: '', label: '— None —' },
+    ...Object.keys(NODE_SKILL_NAMES).map((k) => ({ v: k, label: NODE_SKILL_NAMES[k] })),
+  ];
+  const skillOf = (id: string) => s.nodeSkills?.[nodeKey(id)] ?? '';
+  const skillRow = (id: string) => ({
+    isSel: true,
+    k: 'Skill',
+    options: skillOpts,
+    value: skillOf(id),
+    change: (e: any) =>
+      setState((st) => ({ nodeSkills: { ...st.nodeSkills, [nodeKey(id)]: e.target.value } })),
+  });
+
+  const verifyOn = (id: string) => s.nodeVerify?.[nodeKey(id)] ?? true;
   const verifyRow = (id: string) => {
     const von = verifyOn(id);
     return {
@@ -431,49 +411,14 @@ function routeVals(
       v: von ? 'Requires manual confirmation' : 'No confirmation needed',
       fg: von ? 'var(--ink)' : 'var(--sub)',
       checked: von,
-      toggle: () => {
-        const k = verifyKey(id);
+      toggle: () =>
         setState((st) => ({
-          nodeVerify: {
-            ...st.nodeVerify,
-            [k]: !(st.nodeVerify && st.nodeVerify[k] !== undefined
-              ? st.nodeVerify[k]
-              : defaultVerify[id] !== undefined
-                ? defaultVerify[id]
-                : true),
-          },
-        }));
-      },
+          nodeVerify: { ...st.nodeVerify, [nodeKey(id)]: !(st.nodeVerify?.[nodeKey(id)] ?? true) },
+        })),
     };
   };
 
   const removed = D.removed || [];
-  const has = (id: string) => removed.indexOf(id) < 0;
-  const cfgAll = D.cfg || {};
-  const cfgT = { event: 'Uploaded to DMS', source: 'DMS repository', ...cfgAll.t };
-  const cfgA = { mode: 'Standard', ...cfgAll.a };
-  const cfgAuto = { cond: 'Risk = Low AND all pre-checks passed', ...cfgAll.auto };
-  const cfgRev = { rate: '20%', when: 'Within 24h', ...cfgAll.rev };
-  const opt = (arr: string[]) => arr.map((x) => ({ v: x, label: x }));
-  const setCfg = (id: string, patch: Record<string, string>) =>
-    setState((st) => {
-      const d = st.routeDefs[tab];
-      const c = d.cfg || {};
-      return {
-        routeDefs: {
-          ...st.routeDefs,
-          [tab]: { ...d, cfg: { ...c, [id]: { ...(c[id] || {}), ...patch } }, meta: bump(d.meta) },
-        },
-      };
-    });
-  const removeNode = (id: string) =>
-    setState((st) => {
-      const d = st.routeDefs[tab];
-      return {
-        routeSel: null,
-        routeDefs: { ...st.routeDefs, [tab]: { ...d, removed: [...(d.removed || []), id], meta: bump(d.meta) } },
-      };
-    });
   const restoreNode = (id: string) =>
     setState((st) => {
       const d = st.routeDefs[tab];
@@ -485,33 +430,51 @@ function routeVals(
       };
     });
 
+  // ── node chain ──
+  const chain = D.chain?.length ? D.chain : DEFAULT_CHAIN;
+  const setNodes = (mut: (arr: string[]) => void) =>
+    setState((st) => {
+      const d = st.routeDefs[tab];
+      const arr = [...(d.chain?.length ? d.chain : DEFAULT_CHAIN)];
+      mut(arr);
+      if (!arr.length) return {};
+      return { routeDefs: { ...st.routeDefs, [tab]: { ...d, chain: arr, meta: bump(d.meta) } } };
+    });
+  const addNode = (at?: number) =>
+    setNodes((a) => {
+      let n = a.length + 1;
+      while (a.indexOf(`node${n}`) >= 0) n++;
+      a.splice(at === undefined ? a.length : at, 0, `node${n}`);
+    });
+
   interface FlowNode {
     id: string;
+    i: number;
+    name: string;
     x: number;
     y: number;
     kind: string;
     glyph: string;
     title: string;
     sub: string;
-    person?: string;
   }
-  const nodes: FlowNode[] = [];
-  const mk = (id: string, x: number, y: number, kind: string, glyph: string, title: string, sub: string, person?: string) =>
-    nodes.push({ id, x, y, kind, glyph, title, sub, person });
-  if (has('t')) mk('t', 30, 250, 'trigger', 'IN', 'Document Submitted', cfgT.source);
-  if (has('a')) mk('a', 250, 250, 'agent', 'PR', 'Agent Pre-review', `${cfgA.mode} · format · attachments · ECO`);
-  mk('sw', 470, 217, 'switch', 'GR', 'Risk Grading', 'Agent overall judgment');
-  if (has('auto')) mk('auto', 700, 70, 'auto', 'OK', 'Agent Auto-approve', 'skill · Low-risk auto-approve');
-  if (has('rev')) mk('rev', 925, 70, 'review', 'AU', 'Approval Lead Audit', `Sample ${cfgRev.rate} · ${cfgRev.when}`);
-  const bx = [700, 925, 1150];
-  D.mid.forEach((k, i) => mk(`m${i}`, bx[i], 250, 'human', 'SG', T[k], `Stage ${i + 1} · SLA 24h`, P[k]));
-  D.high.forEach((k, i) => mk(`h${i}`, bx[i], 430, 'human', 'SG', T[k], `Stage ${i + 1} · SLA 24h`, P[k]));
-
+  const nodes: FlowNode[] = chain.map((name, i) => ({
+    id: `n${i}`,
+    i,
+    name,
+    x: NODE_X0 + i * (NODE_W + NODE_GAP),
+    y: NODE_Y,
+    kind: 'step',
+    glyph: String(i + 1),
+    title: name,
+    sub: NODE_SKILL_NAMES[skillOf(`n${i}`)] || 'No skill assigned',
+  }));
   const byId: Record<string, FlowNode> = {};
   nodes.forEach((n) => (byId[n.id] = n));
+
   const cy = (n: FlowNode) => n.y + 33;
   const bez = (x1: number, y1: number, x2: number, y2: number) =>
-    `M ${x1} ${y1} C ${x1 + 62} ${y1}, ${x2 - 62} ${y2}, ${x2} ${y2}`;
+    `M ${x1} ${y1} C ${x1 + 30} ${y1}, ${x2 - 30} ${y2}, ${x2} ${y2}`;
   interface Edge {
     id: string;
     from: string;
@@ -520,257 +483,85 @@ function routeVals(
     stroke: string;
   }
   const edges: Edge[] = [];
-  const link = (id: string, a: string, b: string, stroke?: string) => {
-    const n1 = byId[a],
-      n2 = byId[b];
-    if (!n1 || !n2) return;
-    edges.push({ id, from: a, to: b, d: bez(n1.x + 190, cy(n1), n2.x, cy(n2)), stroke: stroke || 'var(--sub)' });
-  };
-  const spine = ['t', 'a', 'sw'].filter(has);
-  for (let si = 1; si < spine.length; si++) link(`sp-${spine[si]}`, spine[si - 1], spine[si]);
-  const branchFn = (id: string, i: number, target: string, stroke: string) => {
-    const n2 = byId[target];
-    if (n2) edges.push({ id, from: 'sw', to: target, d: bez(660, 277 + 26 * i, n2.x, cy(n2)), stroke });
-  };
-  const lowTarget = has('auto') ? 'auto' : has('rev') ? 'rev' : null;
-  if (lowTarget) branchFn('br-low', 0, lowTarget, G);
-  branchFn('br-mid', 1, 'm0', A);
-  branchFn('br-high', 2, 'h0', R);
-  link('auto-rev', 'auto', 'rev', G);
-  D.mid.forEach((k, i) => {
-    if (i > 0) link(`cm-${i - 1}`, `m${i - 1}`, `m${i}`, A);
-  });
-  D.high.forEach((k, i) => {
-    if (i > 0) link(`ch-${i - 1}`, `h${i - 1}`, `h${i}`, R);
-  });
+  for (let i = 1; i < nodes.length; i++) {
+    const a = nodes[i - 1],
+      b = nodes[i];
+    edges.push({
+      id: `e${i - 1}`,
+      from: a.id,
+      to: b.id,
+      d: bez(a.x + NODE_W, cy(a), b.x, cy(b)),
+      stroke: 'var(--sub)',
+    });
+  }
+  const labels: any[] = [];
 
-  const labels = [
-    { text: 'Low Risk', x: 700, y: 44, bg: GS, fg: G },
-    { text: 'Medium Risk', x: 700, y: 224, bg: AS, fg: A },
-    { text: 'High Risk', x: 700, y: 404, bg: RS, fg: R },
-  ];
+  // The canvas grows with the chain, and taller while a panel is open so the
+  // panel never overflows the scroll area.
+  const canvasW = Math.max(760, NODE_X0 * 2 + nodes.length * NODE_W + (nodes.length - 1) * NODE_GAP);
+  const canvasH = NODE_Y + 66 + (s.routeSel || s.routeEdgeSel ? 420 : 60);
 
-  const iconMap: Record<string, [string, string]> = {
-    trigger: ['var(--accent-soft)', 'var(--accent)'],
-    agent: ['var(--accent-soft)', 'var(--accent)'],
-    switch: [AS, A],
-    human: ['var(--accent-soft)', 'var(--accent)'],
-    auto: [GS, G],
-    review: [AS, A],
-  };
-  const lastM = `m${D.mid.length - 1}`,
-    lastH = `h${D.high.length - 1}`;
-  const flowNodes = nodes.map((n) => {
-    const isSwitch = n.kind === 'switch';
-    const ports: { top: number; left: string; right: string; color: string }[] = [];
-    if (n.id !== 't') ports.push({ top: 28, left: '-5px', right: 'auto', color: 'var(--sub)' });
-    if (isSwitch) {
-      ports.push({ top: 55.5, left: 'auto', right: '-5px', color: G });
-      ports.push({ top: 81.5, left: 'auto', right: '-5px', color: A });
-      ports.push({ top: 107.5, left: 'auto', right: '-5px', color: R });
-    } else if (n.id !== 'rev' && n.id !== lastM && n.id !== lastH) {
-      ports.push({ top: 28, left: 'auto', right: '-5px', color: 'var(--sub)' });
-    }
-    return {
-      ...n,
-      h: isSwitch ? 132 : 66,
-      headH: isSwitch ? 46 : 63,
-      isSwitch,
-      iconBg: iconMap[n.kind][0],
-      iconFg: iconMap[n.kind][1],
-      border: s.routeSel === n.id ? 'var(--accent)' : 'var(--line)',
-      rows: isSwitch
-        ? [
-            { dot: G, label: 'Low Risk', to: '→ Auto-approve' },
-            { dot: A, label: 'Medium Risk', to: `→ ${D.mid.length} levels` },
-            { dot: R, label: 'High Risk', to: `→ ${D.high.length} levels` },
-          ]
-        : [],
-      ports,
-      pick: (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setState({ routeSel: n.id, routeEdgeSel: null });
-      },
-    };
-  });
+  const flowNodes = nodes.map((n) => ({
+    ...n,
+    h: 66,
+    headH: 63,
+    isSwitch: false,
+    rows: [],
+    iconBg: 'var(--accent-soft)',
+    iconFg: 'var(--accent)',
+    border: s.routeSel === n.id ? 'var(--accent)' : 'var(--line)',
+    ports: [
+      ...(n.i > 0 ? [{ top: 28, left: '-5px', right: 'auto', color: 'var(--sub)' }] : []),
+      ...(n.i < nodes.length - 1 ? [{ top: 28, left: 'auto', right: '-5px', color: 'var(--sub)' }] : []),
+    ],
+    pick: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setState({ routeSel: n.id, routeEdgeSel: null });
+    },
+  }));
 
   const sel = s.routeSel ? byId[s.routeSel] : null;
-  const kindLabel: Record<string, string> = {
-    trigger: 'Trigger node',
-    agent: 'Agent node',
-    switch: 'Branch node',
-    human: 'Manual approval',
-    auto: 'Auto-approve',
-    review: 'Audit node',
-  };
+  const kindLabel: Record<string, string> = { step: 'Flow node' };
   const ink = 'var(--ink)';
   let panelRows: any[] = [];
   if (sel) {
-    const delRow = {
-      isBtn: true,
-      danger: true,
-      label: 'Delete node',
-      click: (e: React.MouseEvent) => {
-        e.stopPropagation();
-        removeNode(sel.id);
-      },
-    };
-    if (sel.kind === 'trigger')
-      panelRows = [
-        {
-          isSel: true,
-          k: 'Trigger event',
-          options: opt(['Uploaded to DMS', 'Scheduled trigger']),
-          value: cfgT.event,
-          change: (e: any) => setCfg('t', { event: e.target.value }),
-        },
-        {
-          isSel: true,
-          k: 'Source',
-          options: opt(['DMS repository', 'Form', 'API integration']),
-          value: cfgT.source,
-          change: (e: any) => setCfg('t', { source: e.target.value }),
-        },
-        { k: 'Doc type', v: tab, fg: ink },
-        delRow,
-      ];
-    else if (sel.kind === 'agent')
-      panelRows = [
-        {
-          isSel: true,
-          k: 'Decision mode',
-          options: opt(['Standard', 'Strict (escalate on borderline)', 'Lenient (escalate only High)']),
-          value: cfgA.mode,
-          change: (e: any) => setCfg('a', { mode: e.target.value }),
-        },
-        { k: 'Checks', v: 'format · attachments · version · linked ECO', fg: ink },
-        { k: 'Output', v: 'Risk level (Low / Medium / High)', fg: ink },
-        delRow,
-      ];
-    else if (sel.kind === 'switch') {
-      panelRows = [{ k: 'Low Risk', v: 'Agent Auto-approve (post-audit)', fg: G }];
-      ([['mid', 'Medium Risk', A], ['high', 'High Risk', R]] as ['mid' | 'high', string, string][]).forEach(
-        ([br, name, color]) => {
-          panelRows.push({ k: name, v: `${D[br].length} levels`, fg: color });
-          D[br].forEach((key, i) => {
-            panelRows.push({
-              isSel: true,
-              k: `Stage ${i + 1}`,
-              options: optList,
-              value: key,
-              change: (e: any) => {
-                const v = e.target.value;
-                setChain(br, (a) => {
-                  a[i] = v;
-                });
-              },
-              canRemove: D[br].length > 1,
-              remove: (e: React.MouseEvent) => {
-                e.stopPropagation();
-                setChain(br, (a) => {
-                  a.splice(i, 1);
-                });
-              },
-            });
+    panelRows = [
+      {
+        isInput: true,
+        k: 'Name',
+        value: sel.name,
+        change: (e: any) => {
+          const v = e.target.value;
+          setNodes((a) => {
+            a[sel.i] = v;
           });
-          if (D[br].length < 3)
-            panelRows.push({
-              isBtn: true,
-              label: `＋ ${name} add a stage`,
-              click: (e: React.MouseEvent) => {
-                e.stopPropagation();
-                setChain(br, (a) => {
-                  a.push('v');
-                });
-              },
-            });
         },
-      );
-    } else if (sel.kind === 'human') {
-      const hm = /^([mh])(\d+)$/.exec(sel.id)!;
-      const branch = hm[1] === 'm' ? 'mid' : 'high';
-      const hi = +hm[2];
-      const arr = D[branch];
-      const nextKey = hi + 1 < arr.length ? arr[hi + 1] : 'end';
-      panelRows = [
-        {
-          isSel: true,
-          k: 'Approver',
-          options: optList,
-          value: arr[hi],
-          change: (e: any) => {
-            const v = e.target.value;
-            setChain(branch, (a) => {
-              a[hi] = v;
-            });
-          },
+      },
+      skillRow(sel.id),
+      verifyRow(sel.id),
+      { k: 'Step', v: `${sel.i + 1} of ${nodes.length}`, fg: ink },
+      {
+        isBtn: true,
+        label: '＋ Add node after this',
+        click: (e: React.MouseEvent) => {
+          e.stopPropagation();
+          addNode(sel.i + 1);
         },
-        {
-          isSel: true,
-          k: 'Next stage',
-          options: [...optList, { v: 'end', label: 'End approval' }],
-          value: nextKey,
-          change: (e: any) => {
-            const v = e.target.value;
-            setChain(branch, (a) => {
-              if (v === 'end') a.length = hi + 1;
-              else if (hi + 1 < a.length) a[hi + 1] = v;
-              else a.push(v);
-            });
-          },
+      },
+    ];
+    if (nodes.length > 1)
+      panelRows.push({
+        isBtn: true,
+        danger: true,
+        label: 'Delete node',
+        click: (e: React.MouseEvent) => {
+          e.stopPropagation();
+          setState({ routeSel: null });
+          setNodes((a) => {
+            a.splice(sel.i, 1);
+          });
         },
-        { k: 'SLA', v: '24 hours', fg: ink },
-        { k: 'Actions', v: 'Approve / Reject (reason required)', fg: ink },
-      ];
-      if (arr.length > 1)
-        panelRows.push({
-          isBtn: true,
-          danger: true,
-          label: 'Remove this stage',
-          click: (e: React.MouseEvent) => {
-            e.stopPropagation();
-            setState({ routeSel: null });
-            setChain(branch, (a) => {
-              a.splice(hi, 1);
-            });
-          },
-        });
-    } else if (sel.kind === 'auto')
-      panelRows = [
-        {
-          k: 'Status',
-          v: `Low-risk auto-approve · ${s.skills.auto ? 'Enabled' : 'Disabled (routes to manual)'}`,
-          fg: s.skills.auto ? G : R,
-        },
-        {
-          isSel: true,
-          k: 'Condition',
-          options: opt(['Risk = Low AND all pre-checks passed', 'Only Risk = Low']),
-          value: cfgAuto.cond,
-          change: (e: any) => setCfg('auto', { cond: e.target.value }),
-        },
-        { k: 'After', v: `Approval Lead Audit ${cfgRev.rate}`, fg: ink },
-        delRow,
-      ];
-    else
-      panelRows = [
-        { k: 'Executor', v: 'Approval Lead', fg: ink },
-        {
-          isSel: true,
-          k: 'Sample rate',
-          options: opt(['10%', '20%', '30%', '100%']),
-          value: cfgRev.rate,
-          change: (e: any) => setCfg('rev', { rate: e.target.value }),
-        },
-        {
-          isSel: true,
-          k: 'Timing',
-          options: opt(['Within 24h', 'Within 48h', 'Weekly summary']),
-          value: cfgRev.when,
-          change: (e: any) => setCfg('rev', { when: e.target.value }),
-        },
-        delRow,
-      ];
+      });
   }
 
   let eSel: Edge | null = null;
@@ -780,103 +571,24 @@ function routeVals(
     if (eSel) {
       const nameOf = (id: string) => (byId[id] ? byId[id].title : id);
       edgeTitle = `${nameOf(eSel.from)} → ${nameOf(eSel.to)}`;
-      const clearEdge = () => setState({ routeEdgeSel: null });
-      const eid = eSel.id;
-      const chainEdge = /^c([mh])-(\d+)$/.exec(eid);
-      panelRows = [{ k: 'Source', v: nameOf(eSel.from), fg: ink }];
-      if (eid === 'sp-a') {
-        panelRows.push({
-          isSel: true,
-          k: 'Target',
-          options: opt(['Agent Pre-review', 'Risk Grading (skip pre-review)']),
-          value: 'Agent Pre-review',
-          change: (e: any) => {
-            if (e.target.value !== 'Agent Pre-review') {
-              removeNode('a');
-              clearEdge();
-            }
-          },
-        });
-      } else if (eid === 'sp-sw') {
-        panelRows.push({ k: 'Target', v: 'Risk Grading', fg: ink });
-        if (!has('a'))
-          panelRows.push({
-            isBtn: true,
-            label: '↺ Restore Agent Pre-review node',
-            click: (e: React.MouseEvent) => {
-              e.stopPropagation();
-              restoreNode('a');
-              clearEdge();
-            },
-          });
-      } else if (eid === 'br-low') {
-        const lowOpts = has('rev')
-          ? ['Agent Auto-approve', 'Approval Lead Audit (skip auto-approve)']
-          : ['Agent Auto-approve'];
-        panelRows.push({
-          isSel: true,
-          k: 'Target',
-          options: opt(lowOpts),
-          value: has('auto') ? 'Agent Auto-approve' : 'Approval Lead Audit (skip auto-approve)',
-          change: (e: any) => {
-            const v = e.target.value;
-            clearEdge();
-            if (v === 'Agent Auto-approve') restoreNode('auto');
-            else removeNode('auto');
-          },
-        });
-        panelRows.push({ k: 'Condition', v: 'Risk = Low', fg: G });
-      } else if (eid === 'br-mid' || eid === 'br-high') {
-        const br = eid === 'br-mid' ? 'mid' : 'high';
-        panelRows.push({
-          isSel: true,
-          k: 'Stage 1',
-          options: optList,
-          value: D[br][0],
-          change: (e: any) => {
-            const v = e.target.value;
-            setChain(br, (a) => {
-              a[0] = v;
-            });
-          },
-        });
-        panelRows.push({ k: 'Condition', v: br === 'mid' ? 'Risk = Medium' : 'Risk = High', fg: br === 'mid' ? A : R });
-      } else if (chainEdge) {
-        const br = chainEdge[1] === 'm' ? 'mid' : 'high';
-        const ci = +chainEdge[2];
-        panelRows.push({
-          isSel: true,
-          k: 'Target approver',
-          options: optList,
-          value: D[br][ci + 1],
-          change: (e: any) => {
-            const v = e.target.value;
-            setChain(br, (a) => {
-              a[ci + 1] = v;
-            });
-          },
-        });
-        panelRows.push({
+      const at = byId[eSel.to].i;
+      panelRows = [
+        { k: 'Source', v: nameOf(eSel.from), fg: ink },
+        { k: 'Target', v: nameOf(eSel.to), fg: ink },
+        {
           isBtn: true,
-          danger: true,
-          label: 'Delete link (approval ends here)',
+          label: '＋ Insert node here',
           click: (e: React.MouseEvent) => {
             e.stopPropagation();
-            clearEdge();
-            setChain(br, (a) => {
-              a.length = ci + 1;
-            });
+            setState({ routeEdgeSel: null });
+            addNode(at);
           },
-        });
-      } else {
-        panelRows.push({ k: 'Target', v: nameOf(eSel.to), fg: ink });
-        panelRows.push({ k: 'Condition', v: 'Sent to audit after auto-approve', fg: ink });
-      }
+        },
+      ];
     }
   }
-  if (sel) panelRows = [skillRow(sel.id), verifyRow(sel.id), ...panelRows];
   panelRows = panelRows.map((r) =>
-    r.isBtn || r.isSel || r.isToggle
+    r.isBtn || r.isSel || r.isToggle || r.isInput
       ? r.isBtn
         ? { ...r, fg2: r.danger ? 'var(--red)' : 'var(--sub)' }
         : r
@@ -910,15 +622,26 @@ function routeVals(
       pick: () => setState({ routeTab: k, routeSel: null, routeEdgeSel: null }),
     })),
     routeMeta: D.meta,
+    flowCanvasW: canvasW,
+    flowCanvasH: canvasH,
+    routeAddNode: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      addNode();
+    },
     routeAddFlow: () =>
       setState((st) => {
-        let n = 1;
-        while (st.routeDefs[`New Flow ${n}`]) n++;
-        const name = `New Flow ${n}`;
+        let n = 4;
+        while (st.routeDefs[`Pipeline${n}`]) n++;
+        const name = `Pipeline${n}`;
         return {
           routeDefs: {
             ...st.routeDefs,
-            [name]: { meta: 'v1 · created today · System Admin', mid: ['v'], high: ['v', 'd'] },
+            [name]: {
+              meta: 'v1 · created today · System Admin',
+              mid: ['v'],
+              high: ['v', 'd'],
+              chain: [...DEFAULT_CHAIN],
+            },
           },
           routeOn: { ...st.routeOn, [name]: true },
           routeTab: name,
@@ -936,13 +659,7 @@ function routeVals(
       if (e.key === 'Enter') commitRename();
     },
     routeRenameCommit: commitRename,
-    routeRemovedChips: removed.map((id) => ({
-      label:
-        ({ t: 'Document Submitted', a: 'Agent Pre-review', auto: 'Auto-approve', rev: 'Approval Lead Audit' } as Record<string, string>)[
-          id
-        ] || id,
-      restore: () => restoreNode(id),
-    })),
+    routeRemovedChips: removed.map((id) => ({ label: id, restore: () => restoreNode(id) })),
     routeStateLabel: on ? 'Rule active' : 'Disabled',
     routeStateFg: on ? G : 'var(--sub)',
     routeOn: on,
@@ -964,6 +681,26 @@ function routeVals(
     })),
     flowEdgeLabels: labels,
     routePanelOpen: !!sel || !!eSel,
+    // The panel hangs directly under whatever is selected (centred on the node,
+    // or on the midpoint of a link), clamped to stay inside the canvas.
+    routePanelLeft: (() => {
+      const z = s.routeZoom,
+        PW = 272;
+      const anchor = sel
+        ? sel
+        : eSel
+          ? { x: (byId[eSel.from].x + NODE_W + byId[eSel.to].x) / 2 - NODE_W / 2, y: byId[eSel.to].y }
+          : null;
+      if (!anchor) return '14px';
+      const L = anchor.x * z + (NODE_W * z - PW) / 2;
+      const maxL = canvasW * z - PW - 14;
+      return `${Math.max(14, Math.min(L, Math.max(14, maxL)))}px`;
+    })(),
+    routePanelTop: (() => {
+      const anchor = sel ? sel : eSel ? byId[eSel.to] : null;
+      if (!anchor) return '14px';
+      return `${(anchor.y + 66) * s.routeZoom + 16}px`;
+    })(),
     routePanelTitle: sel ? sel.title : edgeTitle,
     routePanelKind: sel ? `${kindLabel[sel.kind]} · ${tab}` : eSel ? `Link · ${tab}` : '',
     routePanelRows: panelRows,

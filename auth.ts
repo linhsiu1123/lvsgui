@@ -1,7 +1,7 @@
 import NextAuth from 'next-auth';
 import Keycloak from 'next-auth/providers/keycloak';
 import type { JWT } from 'next-auth/jwt';
-import { oidcConfig, tokenEndpoint } from '@/config/oidc';
+import { oidcConfig, tokenEndpoint, isPublicClient } from '@/config/oidc';
 
 /**
  * Refresh an expired Keycloak access token using the stored refresh token.
@@ -11,15 +11,18 @@ import { oidcConfig, tokenEndpoint } from '@/config/oidc';
 async function refreshAccessToken(token: JWT): Promise<JWT> {
   try {
     if (!token.refreshToken) throw new Error('no refresh token');
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: oidcConfig.clientId,
+      refresh_token: token.refreshToken,
+    });
+    // Public clients must not send client_secret at all — Keycloak rejects the
+    // request as invalid_client if the parameter is present but empty.
+    if (!isPublicClient()) body.set('client_secret', oidcConfig.clientSecret);
     const res = await fetch(tokenEndpoint(), {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: oidcConfig.clientId,
-        client_secret: oidcConfig.clientSecret,
-        refresh_token: token.refreshToken,
-      }),
+      body,
     });
     const refreshed = await res.json();
     if (!res.ok) throw refreshed;
@@ -42,8 +45,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Keycloak({
       clientId: oidcConfig.clientId,
-      clientSecret: oidcConfig.clientSecret,
       issuer: oidcConfig.issuer,
+      // A public Keycloak client (Client authentication = Off) has no secret:
+      // tell Auth.js to skip client authentication on the token endpoint and
+      // rely on PKCE. Confidential clients keep sending their secret.
+      ...(isPublicClient()
+        ? { client: { token_endpoint_auth_method: 'none' } }
+        : { clientSecret: oidcConfig.clientSecret }),
+      checks: ['pkce', 'state'],
       authorization: { params: { scope: oidcConfig.scopes } },
     }),
   ],

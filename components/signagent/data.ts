@@ -56,6 +56,16 @@ export const RISK: Record<RiskLevel, { bgVar: string; fgVar: string }> = {
   High: { bgVar: 'var(--red-soft)', fgVar: 'var(--red)' },
 };
 
+// Risk is surfaced as an *alert type* rather than a level: Low is the normal
+// case and carries no badge at all, so only Medium/High get a visible chip.
+export const RISK_LABEL: Record<RiskLevel, string> = { Low: '', Medium: 'Warning', High: 'Error' };
+
+export function riskChip(r: RiskLevel): { label: string; bg: string; fg: string } {
+  return r === 'Low'
+    ? { label: '', bg: 'transparent', fg: 'var(--sub)' }
+    : { label: RISK_LABEL[r], bg: RISK[r].bgVar, fg: RISK[r].fgVar };
+}
+
 export interface PreCheck {
   icon: string;
   ok: boolean;
@@ -167,20 +177,34 @@ export const INITIAL_CASES: CaseItem[] = [
   { id: 'QC-2602', title: 'Rule Deck Change RD-0774 IP merge flow', type: 'Rule Deck Change', ver: 'v4.0', submitter: 'Wu Meng-chun', time: '6/28 09:40', risk: 'Medium', status: 'approved', routeIdx: 2, route: [{ name: 'Verification Dep. Mgr. Lin', state: 'done' }, { name: 'Design Center Assoc. Mgr. Wang', state: 'done' }], lastEvent: '6/29 11:20 · Assoc. Mgr. Wang approved, approval complete' },
 ];
 
-// Routing-rules flow definitions
+// Routing-rules flow definitions.
+//
+// A flow is now an ordered chain of freely named/insertable nodes (`chain`)
+// rather than a fixed trigger→agent→branch topology. `mid`/`high` are the
+// legacy per-risk approver chains, still carried on each pipeline.
 export interface RouteDef {
   meta: string;
   mid: string[];
   high: string[];
+  chain?: string[];
   removed?: string[];
   cfg?: Record<string, Record<string, string>>;
 }
 
+/** Chain a pipeline starts with when it defines none of its own. */
+export const DEFAULT_CHAIN = ['node1', 'node2', 'node3'];
+
 export const INITIAL_ROUTE_DEFS: Record<string, RouteDef> = {
-  'Rule Deck Change': { meta: 'v3 · updated 6/28 · System Admin', mid: ['v', 'd'], high: ['v', 'd', 'g'] },
-  'LVS Verification Report': { meta: 'v2 · updated 5/14 · System Admin', mid: ['v'], high: ['v', 'd'] },
-  'Waiver Request': { meta: 'v4 · updated 6/03 · System Admin', mid: ['v'], high: ['v', 'd'] },
+  Pipeline1: { meta: 'v3 · updated 6/28 · System Admin', mid: ['v', 'd'], high: ['v', 'd', 'g'] },
+  Pipeline2: { meta: 'v2 · updated 5/14 · System Admin', mid: ['v'], high: ['v', 'd'] },
+  Pipeline3: { meta: 'v4 · updated 6/03 · System Admin', mid: ['v'], high: ['v', 'd'] },
 };
+
+// Flow-canvas geometry — nodes sit on a single row, evenly spaced.
+export const NODE_W = 190;
+export const NODE_GAP = 40;
+export const NODE_X0 = 40;
+export const NODE_Y = 40;
 
 // Approver-role role/label maps for the flow canvas
 export const APPROVER_TITLES: Record<string, string> = {
@@ -218,6 +242,14 @@ export const SKILL_NAMES: Record<string, string> = {
   anomaly: 'Anomaly Detection',
 };
 
+// Skills a flow node can be bound to. Anomaly Detection runs continuously
+// across the queue rather than at one step, so it is not offered here.
+export const NODE_SKILL_NAMES: Record<string, string> = {
+  route: 'Routing Decision',
+  precheck: 'Pre-review & Recommendation',
+  auto: 'Low-risk Auto-approve',
+};
+
 // status: [key, label, fgVar, bgVar]
 export const STATUS_DEFS: [string, string, string, string][] = [
   ['pending', 'In Review', 'var(--amber)', 'var(--amber-soft)'],
@@ -226,8 +258,9 @@ export const STATUS_DEFS: [string, string, string, string][] = [
   ['rejected', 'Rejected', 'var(--red)', 'var(--red-soft)'],
 ];
 
+// Overview cards are labelled by the pipeline that handles each document type.
 export const TYPE_DEFS = [
-  { name: 'Rule Deck Change', glyph: 'RD' },
-  { name: 'LVS Verification Report', glyph: 'VR' },
-  { name: 'Waiver Request', glyph: 'WV' },
+  { name: 'Rule Deck Change', label: 'Pipeline1', glyph: 'P1' },
+  { name: 'LVS Verification Report', label: 'Pipeline2', glyph: 'P2' },
+  { name: 'Waiver Request', label: 'Pipeline3', glyph: 'P3' },
 ];

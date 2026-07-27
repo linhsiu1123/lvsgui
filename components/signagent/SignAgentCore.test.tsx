@@ -17,24 +17,33 @@ function goto(tab: string) {
 }
 
 describe('SignAgentCore — Overview dashboard', () => {
-  it('renders the approval overview with all product-type cards and rows', () => {
+  it('renders the approval overview with all pipeline cards and rows', () => {
     render(<SignAgentCore />);
     expect(screen.getByText('Approval Overview')).toBeInTheDocument();
     expect(screen.getByText('QC-2606')).toBeInTheDocument();
-    // three type cards, each with its glyph
-    ['RD', 'VR', 'WV'].forEach((g) => expect(screen.getByText(g)).toBeInTheDocument());
+    // three pipeline cards, each with its glyph
+    ['P1', 'P2', 'P3'].forEach((g) => expect(screen.getByText(g)).toBeInTheDocument());
+    expect(screen.getByText('Pipeline1')).toBeInTheDocument();
   });
 
-  it('filters the table when a product-type card is clicked and clears via "Show all"', () => {
+  it('filters the table when a pipeline card is clicked and clears via "Show all"', () => {
     render(<SignAgentCore />);
-    // Click the "WV" type card (its glyph is unique; the name also appears in table rows)
-    fireEvent.click(screen.getByText('WV'));
+    // Click the "P3" (Waiver Request) card — its glyph is unique on the page
+    fireEvent.click(screen.getByText('P3'));
     // Filter label switches away from "All types"
     expect(screen.getByText('Show all')).toBeInTheDocument();
     // Rule Deck Change rows should be filtered out
     expect(screen.queryByText(/RD-0981/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Show all'));
     expect(screen.getByText(/RD-0981/)).toBeInTheDocument();
+  });
+
+  it('flags only Medium/High cases, leaving low-risk rows unbadged', () => {
+    render(<SignAgentCore />);
+    // QC-2606/2605 are Medium → "Warning", QC-2604 is High → "Error"
+    expect(screen.getAllByText('Warning').length).toBeGreaterThan(0);
+    expect(screen.getByText('Error')).toBeInTheDocument();
+    expect(screen.queryByText(/Low Risk/)).not.toBeInTheDocument();
   });
 
   it('opens the case detail modal from a status pill and can jump to routing rules', () => {
@@ -44,8 +53,9 @@ describe('SignAgentCore — Overview dashboard', () => {
     // modal shows an approval timeline
     expect(screen.getByText('Document Submitted')).toBeInTheDocument();
     fireEvent.click(screen.getByText(/View routing rules/));
-    // now on the routing screen, deep-linked to the risk-grading branch node's panel
-    expect(screen.getByText('Branch node · Rule Deck Change')).toBeInTheDocument();
+    // now on the routing screen, deep-linked to the pipeline handling this doc type
+    expect(screen.getByText('v3 · updated 6/28 · System Admin')).toBeInTheDocument();
+    expect(screen.getByText('node1')).toBeInTheDocument();
   });
 
   it('runs the simulated agent activity feed to completion and appends the new case', () => {
@@ -113,31 +123,26 @@ describe('SignAgentCore — Routing rules canvas', () => {
     goto('Routing Rules');
   }
 
-  it('renders the flow graph nodes and risk branch labels', () => {
+  it('renders the default three-node chain, each awaiting a skill', () => {
     openRoutes();
-    expect(screen.getByText('Document Submitted')).toBeInTheDocument();
-    expect(screen.getByText('Agent Pre-review')).toBeInTheDocument();
-    expect(screen.getByText('Agent Auto-approve')).toBeInTheDocument();
-    expect(screen.getAllByText('Low Risk').length).toBeGreaterThan(0);
+    ['node1', 'node2', 'node3'].forEach((n) => expect(screen.getByText(n)).toBeInTheDocument());
+    expect(screen.getAllByText('No skill assigned')).toHaveLength(3);
   });
 
-  it('opens the config panel for each node kind', () => {
+  it('opens the config panel for the selected node', () => {
     openRoutes();
-    // switch (branch) node
-    fireEvent.click(screen.getByText('Risk Grading'));
-    expect(screen.getByText('Branch node · Rule Deck Change')).toBeInTheDocument();
-    // trigger node
-    fireEvent.click(screen.getByText('Document Submitted'));
-    expect(screen.getByText('Trigger node · Rule Deck Change')).toBeInTheDocument();
-    // agent node
-    fireEvent.click(screen.getByText('Agent Pre-review'));
-    expect(screen.getByText('Agent node · Rule Deck Change')).toBeInTheDocument();
-    // auto node
-    fireEvent.click(screen.getByText('Agent Auto-approve'));
-    expect(screen.getByText('Auto-approve · Rule Deck Change')).toBeInTheDocument();
-    // human node (first "Verification Dep. Mgr." in the canvas)
-    fireEvent.click(screen.getAllByText('Verification Dep. Mgr.')[0]);
-    expect(screen.getByText('Manual approval · Rule Deck Change')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('node2'));
+    expect(screen.getByText('Flow node · Pipeline1')).toBeInTheDocument();
+    // the panel reports the node's position in the chain
+    expect(screen.getByText('2 of 3')).toBeInTheDocument();
+  });
+
+  it('renames a node from the config panel', () => {
+    openRoutes();
+    fireEvent.click(screen.getByText('node1'));
+    fireEvent.change(screen.getByDisplayValue('node1'), { target: { value: 'Intake' } });
+    expect(screen.getByText('Intake')).toBeInTheDocument();
+    expect(screen.queryByText('node1')).not.toBeInTheDocument();
   });
 
   it('zooms in/out and toggles the whole rule on and off', () => {
@@ -154,48 +159,47 @@ describe('SignAgentCore — Routing rules canvas', () => {
     expect(screen.getByText('Disabled')).toBeInTheDocument();
   });
 
-  it('adds a new flow and switches product-type tabs', () => {
+  it('adds a new pipeline and switches between pipeline tabs', () => {
     openRoutes();
     fireEvent.click(screen.getByTitle('Add flow'));
     // new flow enters rename mode with an OK commit button
     expect(screen.getByRole('button', { name: 'OK' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'OK' }));
-    // switch to another product type tab
-    fireEvent.click(screen.getByRole('button', { name: 'Waiver Request' }));
-    expect(screen.getByText('Risk Grading')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pipeline4' })).toBeInTheDocument();
+    // switch to another pipeline tab
+    fireEvent.click(screen.getByRole('button', { name: 'Pipeline3' }));
+    expect(screen.getByText('node1')).toBeInTheDocument();
   });
 
-  it('edits branch stages and flips the per-node human-verify toggle', () => {
+  it('appends, inserts and deletes chain nodes', () => {
     openRoutes();
-    fireEvent.click(screen.getByText('Risk Grading'));
-    // add a Medium-risk stage (Medium starts at 2 → becomes 3)
-    fireEvent.click(screen.getByText(/Medium Risk add a stage/));
-    expect(screen.queryByText(/Medium Risk add a stage/)).not.toBeInTheDocument(); // capped at 3
-    // remove a stage again via the ✕ stage controls
-    fireEvent.click(screen.getAllByTitle('Remove this stage')[0]);
-    expect(screen.getByText(/Medium Risk add a stage/)).toBeInTheDocument();
-    // toggle the panel's "Human verify?" switch (last switch on screen)
-    const verify = screen.getAllByRole('switch').slice(-1)[0];
-    const before = (verify as HTMLInputElement).getAttribute('aria-checked');
-    fireEvent.click(verify);
-    expect((verify as HTMLInputElement).getAttribute('aria-checked')).not.toBe(before);
-  });
-
-  it('deletes a node and restores it from the removed-chip', () => {
-    openRoutes();
-    fireEvent.click(screen.getByText('Document Submitted'));
+    // toolbar button appends to the end of the chain
+    fireEvent.click(screen.getByTitle('Add node'));
+    expect(screen.getByText('node4')).toBeInTheDocument();
+    // panel button inserts directly after the selected node
+    fireEvent.click(screen.getByText('node1'));
+    fireEvent.click(screen.getByText(/Add node after this/));
+    expect(screen.getByText('node5')).toBeInTheDocument();
+    // and deleting takes one back out
+    fireEvent.click(screen.getByText('node5'));
     fireEvent.click(screen.getByText('Delete node'));
-    // node is gone; a restore chip appears in the toolbar
-    const chip = screen.getByText(/↺ Document Submitted/);
-    expect(chip).toBeInTheDocument();
-    fireEvent.click(chip);
-    expect(screen.getByText('Document Submitted')).toBeInTheDocument();
+    expect(screen.queryByText('node5')).not.toBeInTheDocument();
   });
 
-  it('renames the active flow', () => {
+  it('flips the per-node human-verify toggle', () => {
+    openRoutes();
+    fireEvent.click(screen.getByText('node1'));
+    expect(screen.getByText('Requires manual confirmation')).toBeInTheDocument();
+    // the panel's "Human verify?" switch is the last one on screen
+    const verify = screen.getAllByRole('switch').slice(-1)[0];
+    fireEvent.click(verify);
+    expect(screen.getByText('No confirmation needed')).toBeInTheDocument();
+  });
+
+  it('renames the active pipeline', () => {
     openRoutes();
     fireEvent.click(screen.getByTitle('Rename flow'));
-    const input = screen.getByDisplayValue('Rule Deck Change');
+    const input = screen.getByDisplayValue('Pipeline1');
     fireEvent.change(input, { target: { value: 'Renamed Flow' } });
     fireEvent.click(screen.getByRole('button', { name: 'OK' }));
     expect(screen.getByRole('button', { name: 'Renamed Flow' })).toBeInTheDocument();
@@ -219,9 +223,9 @@ describe('SignAgentCore — Routing rules canvas', () => {
 });
 
 describe('SignAgentCore — props', () => {
-  it('hides risk badges when showRisk is false', () => {
+  it('hides alert badges when showRisk is false', () => {
     render(<SignAgentCore showRisk={false} />);
-    expect(screen.queryByText('Medium Risk')).not.toBeInTheDocument();
+    expect(screen.queryByText('Warning')).not.toBeInTheDocument();
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 
