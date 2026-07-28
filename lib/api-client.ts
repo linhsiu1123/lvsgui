@@ -3,10 +3,10 @@
  * talking to the backend directly — the API routes attach the OIDC token and
  * proxy to the real backend service.
  *
- * The existing screens still render from static fixtures (`components/signagent/
- * data.ts`); this client is the migration path to wire them to live data.
+ * `components/signagent/useSignAgentData.ts` is the sole consumer: it owns the
+ * server-backed slice of the console's state and calls through here.
  */
-import type { CaseItem, RouteDef, SkillDef } from '@/components/signagent/data';
+import type { CaseItem, FeedItem, RouteDef, SkillDef } from '@/components/signagent/data';
 
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
   const res = await fetch(input, {
@@ -53,13 +53,18 @@ export const api = {
     list: () => request<Record<string, RouteDef>>('/api/routes'),
     update: (type: string, def: RouteDef) =>
       request<RouteDef>(`/api/routes/${encodeURIComponent(type)}`, jsonInit('PUT', def)),
+    remove: (type: string) => request<null>(`/api/routes/${encodeURIComponent(type)}`, jsonInit('DELETE')),
   },
   skills: {
     list: () => request<SkillDef[]>('/api/skills'),
+    create: (skill: SkillDef) => request<SkillDef>('/api/skills', jsonInit('POST', skill)),
+    /** Partial edit — omitted fields are left alone. `key` is immutable. */
+    update: (key: string, patch: Partial<Omit<SkillDef, 'key'>>) =>
+      request<SkillDef>(`/api/skills/${encodeURIComponent(key)}`, jsonInit('PATCH', patch)),
     toggle: (key: string, enabled: boolean) =>
       request<SkillDef>(`/api/skills/${encodeURIComponent(key)}`, jsonInit('PATCH', { enabled })),
   },
   activity: {
-    list: () => request<unknown[]>('/api/activity'),
+    list: () => request<FeedItem[]>('/api/activity'),
   },
 };

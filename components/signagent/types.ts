@@ -1,11 +1,4 @@
-import {
-  INITIAL_CASES,
-  INITIAL_ROUTE_DEFS,
-  type CaseItem,
-  type RouteDef,
-  type Direction,
-} from './data';
-
+import type { Direction } from './data';
 
 export interface SignAgentProps {
   direction?: Direction;
@@ -13,34 +6,26 @@ export interface SignAgentProps {
   showRisk?: boolean;
 }
 
-export interface FeedItem {
-  icon: string;
-  chip: 'accent' | 'amber' | 'green';
-  text: string;
-  sub: string;
-  time: string;
-}
-
+/**
+ * Purely visual state: which screen is open, what is selected, canvas zoom.
+ *
+ * Everything the backend owns — documents, routing flows, skills, the activity
+ * feed — lives in `useSignAgentData` instead, so there is exactly one place
+ * that can go out of sync with the server.
+ */
 export interface State {
   role: 'dash' | 'approver' | 'admin' | 'routes';
   dashType: string | null;
   dashModal: string | null;
-  cases: CaseItem[];
   selId: string | null;
   rejecting: boolean;
   rejectReason: string;
-  feed: FeedItem[];
-  feedWorking: string | null;
   traceOpen: boolean;
-  skills: { route: boolean; precheck: boolean; auto: boolean; anomaly: boolean };
-  nodeSkills: Record<string, string>;
-  nodeVerify: Record<string, boolean>;
+  /** Empty until the flows load; resolves to the first pipeline. */
   routeTab: string;
   routeSel: string | null;
   routeEdgeSel: string | null;
   routeZoom: number;
-  routeOn: Record<string, boolean>;
-  routeDefs: Record<string, RouteDef>;
   routeRenaming: boolean;
   routeNameDraft: string;
 }
@@ -49,22 +34,14 @@ export const INITIAL_STATE: State = {
   role: 'dash',
   dashType: null,
   dashModal: null,
-  cases: INITIAL_CASES,
-  selId: 'QC-2606',
+  selId: null,
   rejecting: false,
   rejectReason: '',
-  feed: [],
-  feedWorking: null,
   traceOpen: false,
-  skills: { route: true, precheck: true, auto: true, anomaly: true },
-  nodeSkills: {},
-  nodeVerify: {},
-  routeTab: 'Pipeline1',
+  routeTab: '',
   routeSel: null,
   routeEdgeSel: null,
   routeZoom: 0.85,
-  routeOn: { Pipeline1: true, Pipeline2: true, Pipeline3: true },
-  routeDefs: INITIAL_ROUTE_DEFS,
   routeRenaming: false,
   routeNameDraft: '',
 };

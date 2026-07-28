@@ -33,9 +33,11 @@ export const services = {
   routes: {
     list: () => `/qc/routing-flows`,
     update: (type: string) => `/qc/routing-flows/${encodeURIComponent(type)}`,
+    remove: (type: string) => `/qc/routing-flows/${encodeURIComponent(type)}`,
   },
   skills: {
     list: () => `/qc/skills`,
+    create: () => `/qc/skills`,
     toggle: (key: string) => `/qc/skills/${encodeURIComponent(key)}`,
   },
   activity: {

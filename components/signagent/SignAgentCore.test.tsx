@@ -1,243 +1,391 @@
 import React from 'react';
-import { render, screen, fireEvent, within, act, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import SignAgentCore from './SignAgentCore';
+import { api } from '@/lib/api-client';
+import { CASES, FLOWS, SKILLS, ACTIVITY } from './fixtures';
+import type { CaseItem } from './data';
 
-// The live activity feed schedules setTimeout chains; drive them deterministically.
-beforeEach(() => jest.useFakeTimers());
-afterEach(() => {
-  act(() => {
-    jest.runOnlyPendingTimers();
-  });
-  jest.useRealTimers();
-  cleanup();
+// The console talks to the backend through this client; the client itself is
+// covered by lib/api-client.test.ts, so here it is the seam we stub.
+jest.mock('@/lib/api-client', () => ({
+  ApiError: class ApiError extends Error {
+    constructor(
+      public status: number,
+      message: string,
+    ) {
+      super(message);
+    }
+  },
+  api: {
+    cases: { list: jest.fn(), get: jest.fn(), approve: jest.fn(), reject: jest.fn() },
+    routes: { list: jest.fn(), update: jest.fn(), remove: jest.fn() },
+    skills: { list: jest.fn(), toggle: jest.fn() },
+    activity: { list: jest.fn() },
+  },
+}));
+
+// `jest.Mocked` does not reach into the client's nested groups, so describe the
+// stub's shape directly.
+const mocked = api as unknown as {
+  cases: { list: jest.Mock; get: jest.Mock; approve: jest.Mock; reject: jest.Mock };
+  routes: { list: jest.Mock; update: jest.Mock; remove: jest.Mock };
+  skills: { list: jest.Mock; toggle: jest.Mock };
+  activity: { list: jest.Mock };
+};
+const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  mocked.cases.list.mockResolvedValue(clone(CASES));
+  mocked.routes.list.mockResolvedValue(clone(FLOWS));
+  mocked.skills.list.mockResolvedValue(clone(SKILLS));
+  mocked.activity.list.mockResolvedValue(clone(ACTIVITY));
+  mocked.routes.update.mockResolvedValue(clone(FLOWS.Pipeline1));
+  mocked.routes.remove.mockResolvedValue(null);
 });
+
+afterEach(cleanup);
+
+/** Render and wait for the first load to settle. */
+async function renderConsole(props: React.ComponentProps<typeof SignAgentCore> = {}) {
+  const utils = render(<SignAgentCore {...props} />);
+  await screen.findByText('Approval Overview');
+  return utils;
+}
 
 function goto(tab: string) {
   fireEvent.click(screen.getByRole('button', { name: tab }));
 }
 
-describe('SignAgentCore — Overview dashboard', () => {
-  it('renders the approval overview with all pipeline cards and rows', () => {
+describe('SignAgentCore — loading and failure', () => {
+  it('shows a loading state until every resource has arrived', async () => {
+    let release!: (v: CaseItem[]) => void;
+    mocked.cases.list.mockReturnValue(new Promise((res) => (release = res)));
+
     render(<SignAgentCore />);
-    expect(screen.getByText('Approval Overview')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /loading/i })).toBeInTheDocument();
+    expect(screen.queryByText('Approval Overview')).not.toBeInTheDocument();
+
+    release(clone(CASES));
+    expect(await screen.findByText('Approval Overview')).toBeInTheDocument();
+  });
+
+  it('surfaces a failed load and can retry', async () => {
+    mocked.cases.list.mockRejectedValueOnce(new Error('backend unreachable'));
+
+    render(<SignAgentCore />);
+    expect(await screen.findByText('Could not load the approval console')).toBeInTheDocument();
+    expect(screen.getByText('backend unreachable')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Approval Overview')).toBeInTheDocument();
+  });
+
+  it('requests all four resources exactly once on mount', async () => {
+    await renderConsole();
+    expect(mocked.cases.list).toHaveBeenCalledTimes(1);
+    expect(mocked.routes.list).toHaveBeenCalledTimes(1);
+    expect(mocked.skills.list).toHaveBeenCalledTimes(1);
+    expect(mocked.activity.list).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SignAgentCore — Overview dashboard', () => {
+  it('renders server documents in the pipeline cards and the table', async () => {
+    await renderConsole();
     expect(screen.getByText('QC-2606')).toBeInTheDocument();
-    // three pipeline cards, each with its glyph
     ['P1', 'P2', 'P3'].forEach((g) => expect(screen.getByText(g)).toBeInTheDocument());
     expect(screen.getByText('Pipeline1')).toBeInTheDocument();
   });
 
-  it('filters the table when a pipeline card is clicked and clears via "Show all"', () => {
-    render(<SignAgentCore />);
-    // Click the "P3" (Waiver Request) card — its glyph is unique on the page
-    fireEvent.click(screen.getByText('P3'));
-    // Filter label switches away from "All types"
-    expect(screen.getByText('Show all')).toBeInTheDocument();
-    // Rule Deck Change rows should be filtered out
-    expect(screen.queryByText(/RD-0981/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('Show all'));
-    expect(screen.getByText(/RD-0981/)).toBeInTheDocument();
-  });
-
-  it('flags only Medium/High cases, leaving low-risk rows unbadged', () => {
-    render(<SignAgentCore />);
-    // QC-2606/2605 are Medium → "Warning", QC-2604 is High → "Error"
+  it('flags only Medium/High documents', async () => {
+    await renderConsole();
     expect(screen.getAllByText('Warning').length).toBeGreaterThan(0);
     expect(screen.getByText('Error')).toBeInTheDocument();
     expect(screen.queryByText(/Low Risk/)).not.toBeInTheDocument();
   });
 
-  it('opens the case detail modal from a status pill and can jump to routing rules', () => {
-    render(<SignAgentCore />);
-    fireEvent.click(screen.getAllByText('In Review')[0]);
-    expect(screen.getByText(/View routing rules/)).toBeInTheDocument();
-    // modal shows an approval timeline
-    expect(screen.getByText('Document Submitted')).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/View routing rules/));
-    // now on the routing screen, deep-linked to the pipeline handling this doc type
-    expect(screen.getByText('v3 · updated 6/28 · System Admin')).toBeInTheDocument();
-    expect(screen.getByText('node1')).toBeInTheDocument();
+  it('filters by pipeline card and clears again', async () => {
+    await renderConsole();
+    fireEvent.click(screen.getByText('P3'));
+    expect(screen.getByText('Show all')).toBeInTheDocument();
+    expect(screen.queryByText(/RD-0981/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Show all'));
+    expect(screen.getByText(/RD-0981/)).toBeInTheDocument();
   });
 
-  it('runs the simulated agent activity feed to completion and appends the new case', () => {
-    render(<SignAgentCore />);
-    act(() => {
-      jest.advanceTimersByTime(12000);
-    });
-    // final feed event + the newly injected auto-approved case
-    expect(screen.getAllByText(/QC-2608/).length).toBeGreaterThan(0);
+  it('renders the activity feed from the server', async () => {
+    await renderConsole();
+    expect(screen.getByText('QC-2602 approved by Wang')).toBeInTheDocument();
+  });
+
+  it('opens the detail modal and deep-links to the pipeline', async () => {
+    await renderConsole();
+    fireEvent.click(screen.getAllByText('In Review')[0]);
+    expect(screen.getByText('Document Submitted')).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/View routing rules/));
+    expect(screen.getByText('v3 · updated 6/28 · System Admin')).toBeInTheDocument();
   });
 });
 
 describe('SignAgentCore — Approver flow', () => {
-  it('lists pending items and approves the selected multi-level case', () => {
-    render(<SignAgentCore />);
+  it('preselects the first queued document', async () => {
+    await renderConsole();
     goto('Pending Items');
-    expect(screen.getByText(/Awaiting my approval/)).toBeInTheDocument();
-    // QC-2606 is selected by default; approve advances it to the next level
     expect(screen.getByText('Agent Pre-review Report')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
-    // after approving level 1 it leaves the "awaiting me" list → empty-state prompt
-    expect(screen.getByText('Select a request from the left')).toBeInTheDocument();
+    expect(screen.getByText(/Awaiting my approval \(2\)/)).toBeInTheDocument();
   });
 
-  it('reveals the agent reasoning trace on demand', () => {
-    render(<SignAgentCore />);
+  it('approves through the API and takes the server result', async () => {
+    const advanced: CaseItem = {
+      ...clone(CASES[1]),
+      routeIdx: 1,
+      currentLevel2: true,
+      route: [{ name: 'Verification Dep. Mgr. Lin', state: 'done' }, { name: 'Design Center Assoc. Mgr. Wang' }],
+    };
+    mocked.cases.approve.mockResolvedValue(advanced);
+
+    await renderConsole();
     goto('Pending Items');
-    fireEvent.click(screen.getByText(/Show Agent reasoning/));
-    expect(screen.getByText('Risk determination')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => expect(mocked.cases.approve).toHaveBeenCalledWith('QC-2606'));
+    // It left this approver's queue, so the detail pane empties.
+    expect(await screen.findByText('Select a request from the left')).toBeInTheDocument();
+    // and the feed is refreshed so the decision shows up
+    await waitFor(() => expect(mocked.activity.list).toHaveBeenCalledTimes(2));
   });
 
-  it('requires a reason before a rejection is committed', () => {
-    render(<SignAgentCore />);
+  it('requires a reason before rejecting, then posts it', async () => {
+    mocked.cases.reject.mockResolvedValue({ ...clone(CASES[1]), status: 'rejected' });
+
+    await renderConsole();
     goto('Pending Items');
     fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
-    const confirm = screen.getByRole('button', { name: 'Confirm rejection' });
-    // empty reason → no-op, case stays selected
-    fireEvent.click(confirm);
-    expect(screen.getByText('Agent Pre-review Report')).toBeInTheDocument();
-    // provide a reason and confirm
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm rejection' }));
+    expect(mocked.cases.reject).not.toHaveBeenCalled();
+
     fireEvent.change(screen.getByPlaceholderText('Rejection reason (required)'), {
       target: { value: 'insufficient evidence' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Confirm rejection' }));
-    expect(screen.getByText('Select a request from the left')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocked.cases.reject).toHaveBeenCalledWith('QC-2606', 'insufficient evidence'),
+    );
+  });
+
+  it('warns without losing the console when a decision fails', async () => {
+    mocked.cases.approve.mockRejectedValue(new Error('backend exploded'));
+
+    await renderConsole();
+    goto('Pending Items');
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByText('backend exploded')).toBeInTheDocument();
+    // still usable
+    expect(screen.getByRole('button', { name: 'Overview' })).toBeInTheDocument();
+  });
+
+  it('reveals the agent reasoning trace on demand', async () => {
+    await renderConsole();
+    goto('Pending Items');
+    fireEvent.click(screen.getByText(/Show Agent reasoning/));
+    expect(screen.getByText('Risk determination')).toBeInTheDocument();
   });
 });
 
 describe('SignAgentCore — Skills', () => {
-  it('renders four toggleable skills and flips one off', () => {
-    render(<SignAgentCore />);
+  it('renders the skills the server returned', async () => {
+    await renderConsole();
     goto('Skills');
     expect(screen.getByText('AGENT SKILLS')).toBeInTheDocument();
-    const switches = screen.getAllByRole('switch');
-    expect(switches.length).toBeGreaterThanOrEqual(4);
-    expect(switches[0]).toBeChecked();
-    fireEvent.click(switches[0]);
-    expect(switches[0]).not.toBeChecked();
+    expect(screen.getByText('Anomaly Detection')).toBeInTheDocument();
+  });
+
+  it('toggles optimistically and PATCHes the change', async () => {
+    mocked.skills.toggle.mockResolvedValue({ ...SKILLS[0], enabled: false });
+
+    await renderConsole();
+    goto('Skills');
+    const first = screen.getAllByRole('switch')[0];
+    expect(first).toBeChecked();
+
+    fireEvent.click(first);
+    expect(first).not.toBeChecked(); // optimistic, before the request settles
+    await waitFor(() => expect(mocked.skills.toggle).toHaveBeenCalledWith('route', false));
+  });
+
+  it('rolls the switch back when the server rejects the toggle', async () => {
+    mocked.skills.toggle.mockRejectedValue(new Error('nope'));
+
+    await renderConsole();
+    goto('Skills');
+    const first = screen.getAllByRole('switch')[0];
+    fireEvent.click(first);
+
+    await waitFor(() => expect(first).toBeChecked());
+    expect(screen.getByText('nope')).toBeInTheDocument();
   });
 });
 
 describe('SignAgentCore — Routing rules canvas', () => {
-  function openRoutes() {
-    render(<SignAgentCore />);
+  async function openRoutes() {
+    await renderConsole();
     goto('Routing Rules');
   }
 
-  it('renders the default three-node chain, each awaiting a skill', () => {
-    openRoutes();
+  it('renders the chain from the server flow', async () => {
+    await openRoutes();
     ['node1', 'node2', 'node3'].forEach((n) => expect(screen.getByText(n)).toBeInTheDocument());
     expect(screen.getAllByText('No skill assigned')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: 'Pipeline1' })).toBeInTheDocument();
   });
 
-  it('opens the config panel for the selected node', () => {
-    openRoutes();
+  it('opens the config panel for the selected node', async () => {
+    await openRoutes();
     fireEvent.click(screen.getByText('node2'));
     expect(screen.getByText('Flow node · Pipeline1')).toBeInTheDocument();
-    // the panel reports the node's position in the chain
     expect(screen.getByText('2 of 3')).toBeInTheDocument();
   });
 
-  it('renames a node from the config panel', () => {
-    openRoutes();
+  it('persists a node rename', async () => {
+    await openRoutes();
     fireEvent.click(screen.getByText('node1'));
     fireEvent.change(screen.getByDisplayValue('node1'), { target: { value: 'Intake' } });
-    expect(screen.getByText('Intake')).toBeInTheDocument();
-    expect(screen.queryByText('node1')).not.toBeInTheDocument();
+
+    expect(screen.getAllByText('Intake')).toHaveLength(2);
+    await waitFor(() =>
+      expect(mocked.routes.update).toHaveBeenCalledWith(
+        'Pipeline1',
+        expect.objectContaining({ chain: ['Intake', 'node2', 'node3'] }),
+      ),
+    );
   });
 
-  it('zooms in/out and toggles the whole rule on and off', () => {
-    openRoutes();
+  it('collapses a burst of edits into a single save', async () => {
+    await openRoutes();
+    fireEvent.click(screen.getByText('node1'));
+    const input = screen.getByDisplayValue('node1');
+    fireEvent.change(input, { target: { value: 'I' } });
+    fireEvent.change(screen.getByDisplayValue('I'), { target: { value: 'In' } });
+    fireEvent.change(screen.getByDisplayValue('In'), { target: { value: 'Int' } });
+
+    await waitFor(() => expect(mocked.routes.update).toHaveBeenCalled());
+    expect(mocked.routes.update).toHaveBeenCalledTimes(1);
+    expect(mocked.routes.update).toHaveBeenCalledWith(
+      'Pipeline1',
+      expect.objectContaining({ chain: ['Int', 'node2', 'node3'] }),
+    );
+  });
+
+  it('adds and deletes chain nodes, persisting each', async () => {
+    await openRoutes();
+    fireEvent.click(screen.getByTitle('Add node'));
+    expect(screen.getByText('node4')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('node4'));
+    fireEvent.click(screen.getByText('Delete node'));
+    expect(screen.queryByText('node4')).not.toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(mocked.routes.update).toHaveBeenLastCalledWith(
+        'Pipeline1',
+        expect.objectContaining({ chain: ['node1', 'node2', 'node3'] }),
+      ),
+    );
+  });
+
+  it('persists the per-node human-verify toggle', async () => {
+    await openRoutes();
+    fireEvent.click(screen.getByText('node1'));
+    expect(screen.getByText('Requires manual confirmation')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('switch').slice(-1)[0]);
+    expect(screen.getByText('No confirmation needed')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocked.routes.update).toHaveBeenCalledWith(
+        'Pipeline1',
+        expect.objectContaining({ nodeVerify: { n0: false } }),
+      ),
+    );
+  });
+
+  it('persists the rule-active switch', async () => {
+    await openRoutes();
+    expect(screen.getByText('Rule active')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('switch').slice(-1)[0]);
+    expect(screen.getByText('Disabled')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocked.routes.update).toHaveBeenCalledWith('Pipeline1', expect.objectContaining({ enabled: false })),
+    );
+  });
+
+  it('creates a new pipeline on the server', async () => {
+    await openRoutes();
+    fireEvent.click(screen.getByTitle('Add flow'));
+    expect(screen.getByRole('button', { name: 'Pipeline4' })).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(mocked.routes.update).toHaveBeenCalledWith(
+        'Pipeline4',
+        expect.objectContaining({ chain: ['node1', 'node2', 'node3'] }),
+      ),
+    );
+  });
+
+  it('renames a pipeline by re-creating it and removing the old one', async () => {
+    await openRoutes();
+    fireEvent.click(screen.getByTitle('Rename flow'));
+    fireEvent.change(screen.getByDisplayValue('Pipeline1'), { target: { value: 'Renamed Flow' } });
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+
+    expect(screen.getByRole('button', { name: 'Renamed Flow' })).toBeInTheDocument();
+    await waitFor(() => expect(mocked.routes.update).toHaveBeenCalledWith('Renamed Flow', expect.anything()));
+    await waitFor(() => expect(mocked.routes.remove).toHaveBeenCalledWith('Pipeline1'));
+  });
+
+  it('zooms without touching the server', async () => {
+    await openRoutes();
     expect(screen.getByText('85%')).toBeInTheDocument();
     fireEvent.click(screen.getByTitle('Zoom in'));
     expect(screen.getByText('100%')).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle('Zoom out'));
-    expect(screen.getByText('85%')).toBeInTheDocument();
-
-    expect(screen.getByText('Rule active')).toBeInTheDocument();
-    const ruleSwitch = screen.getAllByRole('switch').slice(-1)[0];
-    fireEvent.click(ruleSwitch);
-    expect(screen.getByText('Disabled')).toBeInTheDocument();
+    expect(mocked.routes.update).not.toHaveBeenCalled();
   });
 
-  it('adds a new pipeline and switches between pipeline tabs', () => {
-    openRoutes();
-    fireEvent.click(screen.getByTitle('Add flow'));
-    // new flow enters rename mode with an OK commit button
-    expect(screen.getByRole('button', { name: 'OK' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
-    expect(screen.getByRole('button', { name: 'Pipeline4' })).toBeInTheDocument();
-    // switch to another pipeline tab
-    fireEvent.click(screen.getByRole('button', { name: 'Pipeline3' }));
-    expect(screen.getByText('node1')).toBeInTheDocument();
-  });
-
-  it('appends, inserts and deletes chain nodes', () => {
-    openRoutes();
-    // toolbar button appends to the end of the chain
-    fireEvent.click(screen.getByTitle('Add node'));
-    expect(screen.getByText('node4')).toBeInTheDocument();
-    // panel button inserts directly after the selected node
-    fireEvent.click(screen.getByText('node1'));
-    fireEvent.click(screen.getByText(/Add node after this/));
-    expect(screen.getByText('node5')).toBeInTheDocument();
-    // and deleting takes one back out
-    fireEvent.click(screen.getByText('node5'));
-    fireEvent.click(screen.getByText('Delete node'));
-    expect(screen.queryByText('node5')).not.toBeInTheDocument();
-  });
-
-  it('flips the per-node human-verify toggle', () => {
-    openRoutes();
-    fireEvent.click(screen.getByText('node1'));
-    expect(screen.getByText('Requires manual confirmation')).toBeInTheDocument();
-    // the panel's "Human verify?" switch is the last one on screen
-    const verify = screen.getAllByRole('switch').slice(-1)[0];
-    fireEvent.click(verify);
-    expect(screen.getByText('No confirmation needed')).toBeInTheDocument();
-  });
-
-  it('renames the active pipeline', () => {
-    openRoutes();
-    fireEvent.click(screen.getByTitle('Rename flow'));
-    const input = screen.getByDisplayValue('Pipeline1');
-    fireEvent.change(input, { target: { value: 'Renamed Flow' } });
-    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
-    expect(screen.getByRole('button', { name: 'Renamed Flow' })).toBeInTheDocument();
-  });
-
-  it('sweeps every edge-selection config panel without crashing', () => {
+  it('sweeps every link panel without crashing', async () => {
     const { container } = render(<SignAgentCore />);
-    fireEvent.click(screen.getByRole('button', { name: 'Routing Rules' }));
+    await screen.findByText('Approval Overview');
+    goto('Routing Rules');
+
     const edgePaths = Array.from(container.querySelectorAll('path')).filter((p) =>
       (p.getAttribute('style') || '').includes('transparent'),
     );
     expect(edgePaths.length).toBeGreaterThan(0);
     edgePaths.forEach((p) => {
-      act(() => {
-        fireEvent.click(p);
-      });
-      // each click opens a "Link · …" panel
+      fireEvent.click(p);
       expect(screen.getByText(/Link ·/)).toBeInTheDocument();
     });
   });
 });
 
 describe('SignAgentCore — props', () => {
-  it('hides alert badges when showRisk is false', () => {
-    render(<SignAgentCore showRisk={false} />);
+  it('hides alert badges when showRisk is false', async () => {
+    await renderConsole({ showRisk: false });
     expect(screen.queryByText('Warning')).not.toBeInTheDocument();
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 
-  it('routes the low-risk case to manual approval when lowRiskAuto is false', () => {
-    render(<SignAgentCore lowRiskAuto={false} />);
+  it('routes the low-risk document to manual approval when lowRiskAuto is false', async () => {
+    await renderConsole({ lowRiskAuto: false });
     goto('Pending Items');
-    // QC-2607 (normally auto-approved) now appears as a pending item
     expect(screen.getByText('QC-2607')).toBeInTheDocument();
   });
 
-  it('applies the dark theme palette to the root element', () => {
+  it('applies the dark theme palette to the root element', async () => {
     const { container } = render(<SignAgentCore direction="Ant Dark" />);
+    await screen.findByText('Approval Overview');
     const root = container.firstChild as HTMLElement;
     expect(root.style.getPropertyValue('--bg')).toBe('#000000');
     expect(root.style.getPropertyValue('--surface')).toBe('#141414');

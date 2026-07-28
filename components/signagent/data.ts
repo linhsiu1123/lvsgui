@@ -137,45 +137,16 @@ export interface CaseItem {
   lastEvent: string;
 }
 
-export const NEW_CASE: CaseItem = {
-  id: 'QC-2608',
-  title: 'LVS Verification Report RPT-8834',
-  type: 'LVS Verification Report',
-  ver: 'v1.0',
-  submitter: 'Wu Meng-chun',
-  time: 'just now',
-  risk: 'Low',
-  status: 'auto',
-  route: [{ name: 'Agent Auto-approve', state: 'done' }],
-  lastEvent: 'just now · Agent pre-review passed, auto-approved by low-risk rule',
-};
-
-export interface FeedStep {
-  wait: number;
-  working: string;
+/** One entry of the agent activity feed, as the backend returns it. */
+export interface FeedItem {
   icon: string;
   chip: 'accent' | 'amber' | 'green';
   text: string;
   sub: string;
-  addCase?: boolean;
+  time: string;
+  /** ISO timestamp; present on server-sourced items. */
+  at?: string;
 }
-
-export const FEED_STEPS: FeedStep[] = [
-  { wait: 1400, working: 'Monitoring DMS repository', icon: 'IN', chip: 'accent', text: 'New request QC-2608 · LVS Verification Report RPT-8834', sub: 'Wu Meng-chun · uploaded to DMS' },
-  { wait: 2400, working: 'Reading document & attachments', icon: 'RD', chip: 'accent', text: 'Read RPT-8834 v1.0, 3 attachments', sub: 'Matched template LVS-QC-001' },
-  { wait: 2600, working: 'Running pre-review checks', icon: 'PR', chip: 'accent', text: 'Pre-review passed: format ✓ attachments 3/3 ✓ no open ECO', sub: '' },
-  { wait: 2300, working: 'Risk grading', icon: 'GR', chip: 'amber', text: 'Risk grade: Low (small change, no rejection history)', sub: 'Route → Agent auto-approve' },
-  { wait: 2000, working: 'Applying auto-approve rule', icon: 'OK', chip: 'green', text: 'QC-2608 auto-approved, queued for approval-lead audit', sub: 'Sampling rate 20%', addCase: true },
-];
-
-export const INITIAL_CASES: CaseItem[] = [
-  { id: 'QC-2607', title: 'LVS Verification Report RPT-8821', type: 'LVS Verification Report', ver: 'v1.0', submitter: 'Chen Ya-ting', time: 'Today 09:12', risk: 'Low', status: 'auto', route: [{ name: 'Agent Auto-approve', state: 'done' }], lastEvent: 'Today 09:13 · Agent pre-review passed, auto-approved by low-risk rule' },
-  { id: 'QC-2606', title: 'Rule Deck Change RD-0981 M0 device compare', type: 'Rule Deck Change', ver: 'v2.1', submitter: 'Chen Ya-ting', time: 'Yesterday 16:40', risk: 'Medium', status: 'pending', routeIdx: 0, route: [{ name: 'Verification Dep. Mgr. Lin' }, { name: 'Design Center Assoc. Mgr. Wang' }], lastEvent: 'Yesterday 16:41 · Agent pre-review done, routed to Verification Dep. Mgr. Lin' },
-  { id: 'QC-2605', title: 'Waiver Request WV-0331', type: 'Waiver Request', ver: 'v1.0', submitter: 'Liu Chien-hung', time: '7/03 11:05', risk: 'Medium', status: 'pending', routeIdx: 0, route: [{ name: 'Verification Dep. Mgr. Lin' }], lastEvent: '7/03 11:06 · Agent detected an open linked ECO' },
-  { id: 'QC-2604', title: 'Waiver Request WV-0312', type: 'Waiver Request', ver: 'v3.0', submitter: 'Liu Chien-hung', time: '7/01 14:22', risk: 'High', status: 'rejected', routeIdx: 0, route: [{ name: 'Verification Dep. Mgr. Lin', state: 'rejected' }], lastEvent: '7/01 15:02 · Dep. Mgr. Lin rejected: false-alarm root-cause analysis lacks evidence' },
-  { id: 'QC-2603', title: 'LVS Verification Report RPT-8790', type: 'LVS Verification Report', ver: 'v1.0', submitter: 'Wu Meng-chun', time: '6/30 10:18', risk: 'Low', status: 'auto', route: [{ name: 'Agent Auto-approve', state: 'done' }], lastEvent: '6/30 10:19 · Agent pre-review passed, auto-approved' },
-  { id: 'QC-2602', title: 'Rule Deck Change RD-0774 IP merge flow', type: 'Rule Deck Change', ver: 'v4.0', submitter: 'Wu Meng-chun', time: '6/28 09:40', risk: 'Medium', status: 'approved', routeIdx: 2, route: [{ name: 'Verification Dep. Mgr. Lin', state: 'done' }, { name: 'Design Center Assoc. Mgr. Wang', state: 'done' }], lastEvent: '6/29 11:20 · Assoc. Mgr. Wang approved, approval complete' },
-];
 
 // Routing-rules flow definitions.
 //
@@ -189,16 +160,16 @@ export interface RouteDef {
   chain?: string[];
   removed?: string[];
   cfg?: Record<string, Record<string, string>>;
+  /** Whether the whole rule is active (the canvas toolbar switch). */
+  enabled?: boolean;
+  /** Node id ("n0", "n1", …) → agent skill key. */
+  nodeSkills?: Record<string, string>;
+  /** Node id → whether that step needs a human confirmation. */
+  nodeVerify?: Record<string, boolean>;
 }
 
 /** Chain a pipeline starts with when it defines none of its own. */
 export const DEFAULT_CHAIN = ['node1', 'node2', 'node3'];
-
-export const INITIAL_ROUTE_DEFS: Record<string, RouteDef> = {
-  Pipeline1: { meta: 'v3 · updated 6/28 · System Admin', mid: ['v', 'd'], high: ['v', 'd', 'g'] },
-  Pipeline2: { meta: 'v2 · updated 5/14 · System Admin', mid: ['v'], high: ['v', 'd'] },
-  Pipeline3: { meta: 'v4 · updated 6/03 · System Admin', mid: ['v'], high: ['v', 'd'] },
-};
 
 // Flow-canvas geometry — nodes sit on a single row, evenly spaced.
 export const NODE_W = 190;
@@ -206,49 +177,19 @@ export const NODE_GAP = 40;
 export const NODE_X0 = 40;
 export const NODE_Y = 40;
 
-// Approver-role role/label maps for the flow canvas
-export const APPROVER_TITLES: Record<string, string> = {
-  v: 'Verification Dep. Mgr.',
-  d: 'Design Center Assoc. Mgr.',
-  g: 'General Manager',
-  q: 'QA Dept. Mgr.',
-};
-
-export const APPROVER_PERSONS: Record<string, string> = {
-  v: 'Dep. Mgr. Lin · Verification',
-  d: 'Assoc. Mgr. Wang · Design Center',
-  g: 'GM Office',
-  q: 'Dept. Mgr. Tsai · QA',
-};
-
+/** An agent skill as the backend returns it. */
 export interface SkillDef {
-  key: 'route' | 'precheck' | 'auto' | 'anomaly';
+  key: string;
   glyph: string;
   name: string;
   desc: string;
+  enabled: boolean;
 }
 
-export const SKILL_DEFS: SkillDef[] = [
-  { key: 'route', glyph: 'RT', name: 'Routing Decision', desc: 'Automatically decides which managers and how many approval levels based on doc type and risk.' },
-  { key: 'precheck', glyph: 'PR', name: 'Pre-review & Recommendation', desc: 'Checks format, attachments, version, and linked ECO before routing, with an approve/reject recommendation.' },
-  { key: 'auto', glyph: 'OK', name: 'Low-risk Auto-approve', desc: 'Low-risk requests skip manual approval; audited afterward by the approval lead (20% sampling).' },
-  { key: 'anomaly', glyph: 'AL', name: 'Anomaly Detection', desc: 'Watches for resubmissions, mismatched attachments, and routing bypasses; alerts the approval lead in real time.' },
-];
-
-export const SKILL_NAMES: Record<string, string> = {
-  route: 'Routing Decision',
-  precheck: 'Pre-review & Recommendation',
-  auto: 'Low-risk Auto-approve',
-  anomaly: 'Anomaly Detection',
-};
-
-// Skills a flow node can be bound to. Anomaly Detection runs continuously
-// across the queue rather than at one step, so it is not offered here.
-export const NODE_SKILL_NAMES: Record<string, string> = {
-  route: 'Routing Decision',
-  precheck: 'Pre-review & Recommendation',
-  auto: 'Low-risk Auto-approve',
-};
+// Built-in skills that run continuously across the queue rather than at one
+// step in a flow, so the canvas does not offer them as a node binding.
+// Skills added by operators are always offered.
+export const NON_NODE_SKILLS: readonly string[] = ['anomaly'];
 
 // status: [key, label, fgVar, bgVar]
 export const STATUS_DEFS: [string, string, string, string][] = [

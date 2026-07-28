@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { AntdRegistry } from '@ant-design/nextjs-registry';
 import { auth } from '@/auth';
+import { isAuthBypassEnabled, debugSession } from '@/config/auth-mode';
 import Providers from './providers';
 import './globals.css';
 
@@ -10,7 +11,9 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth();
+  // Under the bypass, Auth.js is never consulted — calling it with no Keycloak
+  // issuer configured would only log an InvalidEndpoints error per request.
+  const session = isAuthBypassEnabled() ? debugSession() : await auth();
   return (
     <html lang="en">
       <head>

@@ -1,0 +1,7 @@
+{
+  "tool_name": "mcp__Claude_Browser__javascript_tool",
+  "tool_input_preview": "{\"action\":\"javascript_exec\",\"text\":\"const btn = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Routing Rules');\\nbtn.click();\\nawait new Promise(r => setTimeout(r, 600));...",
+  "error": "javascript_tool failed: SyntaxError: await is only valid in async functions and the top level bodies of modules",
+  "timestamp": "2026-07-28T14:58:18.374Z",
+  "retry_count": 1
+}

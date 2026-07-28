@@ -2,15 +2,22 @@
 import { backendFetch, BackendError } from './backend';
 import { auth } from '@/auth';
 import { isBackendConfigured } from '@/config/services';
+import { isAuthBypassEnabled, debugAccessToken } from '@/config/auth-mode';
 
 jest.mock('@/auth', () => ({ auth: jest.fn() }));
 jest.mock('@/config/services', () => ({
   backendConfig: { baseUrl: 'https://backend.test', timeoutMs: 5000 },
   isBackendConfigured: jest.fn(() => true),
 }));
+jest.mock('@/config/auth-mode', () => ({
+  isAuthBypassEnabled: jest.fn(() => false),
+  debugAccessToken: jest.fn(() => undefined),
+}));
 
 const mockedAuth = auth as unknown as jest.Mock;
 const mockedConfigured = isBackendConfigured as unknown as jest.Mock;
+const mockedBypass = isAuthBypassEnabled as unknown as jest.Mock;
+const mockedDebugToken = debugAccessToken as unknown as jest.Mock;
 
 const okResponse = (body: unknown) =>
   Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(body == null ? '' : JSON.stringify(body)) });
@@ -25,6 +32,8 @@ describe('backendFetch', () => {
     jest.spyOn(AbortSignal, 'timeout').mockReturnValue(new AbortController().signal);
     mockedAuth.mockReset();
     mockedConfigured.mockReset().mockReturnValue(true);
+    mockedBypass.mockReset().mockReturnValue(false);
+    mockedDebugToken.mockReset().mockReturnValue(undefined);
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -98,6 +107,36 @@ describe('backendFetch', () => {
     mockedAuth.mockResolvedValue({ accessToken: 't' });
     fetchMock.mockRejectedValue(new Error('ECONNREFUSED'));
     await expect(backendFetch('/c')).rejects.toMatchObject({ status: 502 });
+  });
+
+  describe('with the development auth bypass on', () => {
+    beforeEach(() => mockedBypass.mockReturnValue(true));
+
+    it('calls the backend without consulting the session at all', async () => {
+      fetchMock.mockReturnValue(okResponse({ ok: 1 }));
+
+      await backendFetch('/qc/documents');
+
+      expect(mockedAuth).not.toHaveBeenCalled();
+      const init = fetchMock.mock.calls[0][1];
+      expect((init.headers as Record<string, string>).authorization).toBeUndefined();
+    });
+
+    it('still sends AUTH_BYPASS_TOKEN as a Bearer header when one is configured', async () => {
+      mockedDebugToken.mockReturnValue('tok-debug');
+      fetchMock.mockReturnValue(okResponse({ ok: 1 }));
+
+      await backendFetch('/qc/documents');
+
+      const init = fetchMock.mock.calls[0][1];
+      expect((init.headers as Record<string, string>).authorization).toBe('Bearer tok-debug');
+    });
+
+    it('does not bypass the backend-configuration check', async () => {
+      mockedConfigured.mockReturnValue(false);
+      await expect(backendFetch('/x')).rejects.toMatchObject({ status: 500 });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   it('BackendError exposes status and body', () => {

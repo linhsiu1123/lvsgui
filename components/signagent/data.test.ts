@@ -3,16 +3,11 @@ import {
   DARK_THEME,
   THEMES,
   RISK,
+  RISK_LABEL,
   PRECHECKS,
   SUGGESTIONS,
   TRACES,
-  NEW_CASE,
-  FEED_STEPS,
-  INITIAL_CASES,
-  INITIAL_ROUTE_DEFS,
-  APPROVER_TITLES,
-  APPROVER_PERSONS,
-  SKILL_DEFS,
+  DEFAULT_CHAIN,
   SKILL_NAMES,
   NODE_SKILL_NAMES,
   STATUS_DEFS,
@@ -48,27 +43,21 @@ describe('risk + status definitions', () => {
   });
 });
 
-describe('case + feed fixtures', () => {
-  it('ships six initial cases with unique ids', () => {
-    const ids = INITIAL_CASES.map((c) => c.id);
-    expect(ids).toHaveLength(6);
-    expect(new Set(ids).size).toBe(6);
+describe('alert-type chips', () => {
+  it('leaves low risk unbadged and maps Medium/High to Warning/Error', () => {
+    expect(riskChip('Low').label).toBe('');
+    expect(riskChip('Medium')).toMatchObject({ label: 'Warning', fg: RISK.Medium.fgVar });
+    expect(riskChip('High')).toMatchObject({ label: 'Error', fg: RISK.High.fgVar });
   });
 
-  it('NEW_CASE is a low-risk auto-approved report', () => {
-    expect(NEW_CASE.id).toBe('QC-2608');
-    expect(NEW_CASE.risk).toBe('Low');
-    expect(NEW_CASE.status).toBe('auto');
-  });
-
-  it('the feed pipeline adds exactly one case at the end', () => {
-    expect(FEED_STEPS).toHaveLength(5);
-    expect(FEED_STEPS.filter((s) => s.addCase)).toHaveLength(1);
-    expect(FEED_STEPS[FEED_STEPS.length - 1].addCase).toBe(true);
+  it('RISK_LABEL covers every level', () => {
+    expect(Object.keys(RISK_LABEL).sort()).toEqual(['High', 'Low', 'Medium']);
   });
 });
 
 describe('pre-review / suggestion / trace maps', () => {
+  // These stay client-side: the backend does not model the agent's per-document
+  // analysis, so the console renders canned reports for the demo documents.
   it('provides a default and a QC-2605-specific override for each', () => {
     expect(PRECHECKS.default.length).toBeGreaterThan(0);
     expect(PRECHECKS['QC-2605'].some((c) => !c.ok)).toBe(true);
@@ -79,33 +68,7 @@ describe('pre-review / suggestion / trace maps', () => {
   });
 });
 
-describe('routing definitions', () => {
-  it('is keyed by pipeline, one per product type', () => {
-    expect(Object.keys(INITIAL_ROUTE_DEFS)).toEqual(TYPE_DEFS.map((t) => t.label));
-  });
-
-  it('defines mid/high approval chains per pipeline', () => {
-    Object.values(INITIAL_ROUTE_DEFS).forEach((def) => {
-      expect(def.mid.length).toBeGreaterThan(0);
-      expect(def.high.length).toBeGreaterThanOrEqual(def.mid.length);
-    });
-  });
-
-  it('every chain key resolves to a title and a person', () => {
-    const keys = new Set<string>();
-    Object.values(INITIAL_ROUTE_DEFS).forEach((d) => [...d.mid, ...d.high].forEach((k) => keys.add(k)));
-    keys.forEach((k) => {
-      expect(APPROVER_TITLES[k]).toBeTruthy();
-      expect(APPROVER_PERSONS[k]).toBeTruthy();
-    });
-  });
-});
-
 describe('skills + types', () => {
-  it('skill defs align with the skill-name lookup', () => {
-    SKILL_DEFS.forEach((d) => expect(SKILL_NAMES[d.key]).toBe(d.name));
-  });
-
   it('offers every skill but Anomaly Detection to flow nodes', () => {
     expect(Object.keys(NODE_SKILL_NAMES)).toEqual(['route', 'precheck', 'auto']);
     Object.entries(NODE_SKILL_NAMES).forEach(([k, name]) => expect(SKILL_NAMES[k]).toBe(name));
@@ -119,12 +82,8 @@ describe('skills + types', () => {
     ]);
     expect(TYPE_DEFS.map((t) => t.label)).toEqual(['Pipeline1', 'Pipeline2', 'Pipeline3']);
   });
-});
 
-describe('alert-type chips', () => {
-  it('leaves low risk unbadged and maps Medium/High to Warning/Error', () => {
-    expect(riskChip('Low').label).toBe('');
-    expect(riskChip('Medium')).toMatchObject({ label: 'Warning', fg: RISK.Medium.fgVar });
-    expect(riskChip('High')).toMatchObject({ label: 'Error', fg: RISK.High.fgVar });
+  it('a new pipeline starts with three nodes', () => {
+    expect(DEFAULT_CHAIN).toEqual(['node1', 'node2', 'node3']);
   });
 });

@@ -1,5 +1,6 @@
 import { auth } from '@/auth';
 import { backendConfig, isBackendConfigured } from '@/config/services';
+import { isAuthBypassEnabled, debugAccessToken } from '@/config/auth-mode';
 
 /** Error carrying an HTTP status + parsed body, thrown by `backendFetch`. */
 export class BackendError extends Error {
@@ -27,13 +28,23 @@ interface BackendFetchOptions {
  * Reads the Keycloak access token from the session and forwards it as a
  * `Bearer` token — this is how "every backend service passes OIDC
  * authentication". Throws `BackendError` on auth/config/HTTP failures.
+ *
+ * Under the development auth bypass there is no session: the optional
+ * `AUTH_BYPASS_TOKEN` is sent instead, or no `Authorization` header at all.
  */
 export async function backendFetch<T = unknown>(path: string, opts: BackendFetchOptions = {}): Promise<T> {
-  const session = await auth();
+  let accessToken: string | undefined;
 
-  if (!session?.accessToken || session.error === 'RefreshAccessTokenError') {
-    throw new BackendError(401, { error: 'not_authenticated' });
+  if (isAuthBypassEnabled()) {
+    accessToken = debugAccessToken();
+  } else {
+    const session = await auth();
+    if (!session?.accessToken || session.error === 'RefreshAccessTokenError') {
+      throw new BackendError(401, { error: 'not_authenticated' });
+    }
+    accessToken = session.accessToken;
   }
+
   if (!isBackendConfigured()) {
     throw new BackendError(500, { error: 'backend_not_configured', detail: 'BACKEND_BASE_URL is not set' });
   }
@@ -52,7 +63,7 @@ export async function backendFetch<T = unknown>(path: string, opts: BackendFetch
         accept: 'application/json',
         ...(hasBody ? { 'content-type': 'application/json' } : {}),
         ...opts.headers,
-        authorization: `Bearer ${session.accessToken}`,
+        ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
       },
       body: hasBody ? JSON.stringify(opts.body) : undefined,
       cache: 'no-store',

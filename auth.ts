@@ -2,6 +2,7 @@ import NextAuth from 'next-auth';
 import Keycloak from 'next-auth/providers/keycloak';
 import type { JWT } from 'next-auth/jwt';
 import { oidcConfig, tokenEndpoint, isPublicClient } from '@/config/oidc';
+import { isAuthBypassEnabled } from '@/config/auth-mode';
 
 /**
  * Refresh an expired Keycloak access token using the stored refresh token.
@@ -42,20 +43,33 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // Required for non-Vercel / self-hosted / proxied deployments.
   trustHost: true,
-  providers: [
-    Keycloak({
-      clientId: oidcConfig.clientId,
-      issuer: oidcConfig.issuer,
-      // A public Keycloak client (Client authentication = Off) has no secret:
-      // tell Auth.js to skip client authentication on the token endpoint and
-      // rely on PKCE. Confidential clients keep sending their secret.
-      ...(isPublicClient()
-        ? { client: { token_endpoint_auth_method: 'none' } }
-        : { clientSecret: oidcConfig.clientSecret }),
-      checks: ['pkce', 'state'],
-      authorization: { params: { scope: oidcConfig.scopes } },
-    }),
-  ],
+  // Under the dev auth bypass nothing here is ever exercised, but Auth.js still
+  // wants a secret to construct itself — supply a throwaway so `AUTH_BYPASS=true`
+  // runs against a completely empty .env.local. Never reachable in production:
+  // `isAuthBypassEnabled()` returns false there.
+  ...(isAuthBypassEnabled() && !process.env.AUTH_SECRET
+    ? { secret: 'auth-bypass-development-only-secret' }
+    : {}),
+  // Registering Keycloak without an issuer makes Auth.js assert on every call
+  // (InvalidEndpoints), which turns a plain "not configured yet" into an
+  // opaque 500. With no issuer we register nothing: /api/auth/* then answers
+  // with an empty session, and `middleware.ts` is what reports the real cause.
+  providers: oidcConfig.issuer
+    ? [
+        Keycloak({
+          clientId: oidcConfig.clientId,
+          issuer: oidcConfig.issuer,
+          // A public Keycloak client (Client authentication = Off) has no
+          // secret: tell Auth.js to skip client authentication on the token
+          // endpoint and rely on PKCE. Confidential clients keep their secret.
+          ...(isPublicClient()
+            ? { client: { token_endpoint_auth_method: 'none' } }
+            : { clientSecret: oidcConfig.clientSecret }),
+          checks: ['pkce', 'state'],
+          authorization: { params: { scope: oidcConfig.scopes } },
+        }),
+      ]
+    : [],
   session: { strategy: 'jwt' },
   callbacks: {
     async jwt({ token, account }) {

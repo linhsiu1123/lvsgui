@@ -1,9 +1,52 @@
 'use client';
 
-import { Avatar, Input, Modal, Select, Switch, Table, Tooltip } from 'antd';
+import { Alert, Avatar, Input, Modal, Select, Skeleton, Switch, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+/** Shown while the first load of documents, flows and skills is in flight. */
+export function LoadingScreen() {
+  return (
+    <div className="max-w-[1400px] mx-auto pt-[26px] px-7 pb-12" role="status" aria-label="Loading console data">
+      <Skeleton active paragraph={{ rows: 2 }} />
+      <div className="mt-8">
+        <Skeleton active paragraph={{ rows: 6 }} />
+      </div>
+    </div>
+  );
+}
+
+/** The initial load failed outright — nothing can be rendered. */
+export function ErrorScreen({ message, onRetry }: { message: string | null; onRetry: () => void }) {
+  return (
+    <div className="max-w-[680px] mx-auto pt-16 px-7">
+      <Alert
+        type="error"
+        showIcon
+        message="Could not load the approval console"
+        description={message ?? 'The approval service did not respond.'}
+        action={
+          <button
+            onClick={onRetry}
+            className="cursor-pointer text-xs font-bold px-3 py-1.5 rounded-md border border-line bg-surface text-accent"
+          >
+            Retry
+          </button>
+        }
+      />
+    </div>
+  );
+}
+
+/** A write failed, but the console is still usable — never block on this. */
+export function ActionErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <div className="px-7 pt-3">
+      <Alert type="warning" showIcon closable message={message} onClose={onDismiss} />
+    </div>
+  );
+}
 
 // Repeated Tailwind recipes for the design's building blocks.
 const mono = 'font-mono';
@@ -477,10 +520,94 @@ export function ApproverScreen({ vals }: { vals: any }) {
   );
 }
 
+interface SkillDraft {
+  key: string;
+  glyph: string;
+  name: string;
+  desc: string;
+  enabled: boolean;
+}
+
+const EMPTY_DRAFT: SkillDraft = { key: '', glyph: '', name: '', desc: '', enabled: true };
+
+// Mirrors the backend's key pattern so bad input is caught before the request.
+const KEY_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+
 export function SkillsScreen({ vals }: { vals: any }) {
+  // `editing` is the key being edited, or '' for a new skill, or null when the
+  // dialog is closed.
+  const [editing, setEditing] = React.useState<string | null>(null);
+  const [draft, setDraft] = React.useState<SkillDraft>(EMPTY_DRAFT);
+  const [error, setError] = React.useState<string | null>(null);
+  const [saving, setSaving] = React.useState(false);
+
+  const isNew = editing === '';
+
+  const openNew = () => {
+    setDraft(EMPTY_DRAFT);
+    setError(null);
+    setEditing('');
+  };
+  const openEdit = (sk: any) => {
+    setDraft({ key: sk.key, glyph: sk.glyph, name: sk.name, desc: sk.desc, enabled: sk.enabled });
+    setError(null);
+    setEditing(sk.key);
+  };
+  const close = () => {
+    setEditing(null);
+    setError(null);
+  };
+
+  const set = (patch: Partial<SkillDraft>) => setDraft((d) => ({ ...d, ...patch }));
+
+  function validate(): string | null {
+    if (isNew) {
+      if (!draft.key.trim()) return 'A key is required.';
+      if (!KEY_PATTERN.test(draft.key)) {
+        return 'Key must be lowercase letters, digits, hyphen or underscore, starting with a letter or digit.';
+      }
+      if (vals.existingSkillKeys.includes(draft.key)) return `A skill with key "${draft.key}" already exists.`;
+    }
+    if (!draft.glyph.trim()) return 'A badge is required.';
+    if (draft.glyph.length > 4) return 'Badge must be 4 characters or fewer.';
+    if (!draft.name.trim()) return 'A name is required.';
+    if (!draft.desc.trim()) return 'A description is required.';
+    return null;
+  }
+
+  async function save() {
+    const invalid = validate();
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
+    setSaving(true);
+    const failure = isNew
+      ? await vals.skillCreate({ ...draft, key: draft.key.trim() })
+      : await vals.skillUpdate(draft.key, {
+          glyph: draft.glyph,
+          name: draft.name,
+          desc: draft.desc,
+          enabled: draft.enabled,
+        });
+    setSaving(false);
+    if (failure) setError(failure);
+    else close();
+  }
+
   return (
     <div className="max-w-[960px] mx-auto pt-[26px] px-7 pb-12">
-      <div className="text-xs font-bold tracking-[0.08em] text-sub mb-3">AGENT SKILLS</div>
+      <div className="flex items-center gap-3 mb-3">
+        <span className="text-xs font-bold tracking-[0.08em] text-sub">AGENT SKILLS</span>
+        <div className="flex-1" />
+        <button
+          onClick={openNew}
+          className="sa-hover-accent-text cursor-pointer border border-dashed border-line bg-transparent text-accent text-xs font-bold px-3 py-1.5 rounded-md"
+        >
+          ＋ New skill
+        </button>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         {vals.skillCards.map((sk: any) => (
           <div
@@ -492,13 +619,90 @@ export function SkillsScreen({ vals }: { vals: any }) {
               {sk.glyph}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="font-bold text-sm">{sk.name}</div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm">{sk.name}</span>
+                <button
+                  onClick={() => openEdit(sk)}
+                  aria-label={`Edit ${sk.name}`}
+                  title="Edit skill"
+                  className="sa-hover-surface2 cursor-pointer border-none bg-transparent text-sub text-xs w-[22px] h-[22px] rounded-md flex-none"
+                >
+                  ✎
+                </button>
+              </div>
               <div className="text-[12.5px] text-sub leading-[1.6] mt-1">{sk.desc}</div>
             </div>
             <Switch checked={sk.on} onChange={sk.toggle} />
           </div>
         ))}
       </div>
+
+      <Modal
+        open={editing !== null}
+        title={isNew ? 'New skill' : `Edit ${draft.name || draft.key}`}
+        onCancel={close}
+        onOk={save}
+        okText={isNew ? 'Create' : 'Save'}
+        confirmLoading={saving}
+        destroyOnHidden
+        getContainer={false}
+        width={520}
+      >
+        <div className="flex flex-col gap-3 pt-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-[12px] text-sub">
+              Key {isNew ? '' : '(immutable — flow nodes are bound to it)'}
+            </span>
+            <Input
+              value={draft.key}
+              onChange={(e) => set({ key: e.target.value })}
+              disabled={!isNew}
+              placeholder="duplicate-check"
+              aria-label="Skill key"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-[12px] text-sub">Badge</span>
+            <Input
+              value={draft.glyph}
+              onChange={(e) => set({ glyph: e.target.value })}
+              maxLength={4}
+              placeholder="DC"
+              aria-label="Skill badge"
+              className="w-24"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-[12px] text-sub">Name</span>
+            <Input
+              value={draft.name}
+              onChange={(e) => set({ name: e.target.value })}
+              placeholder="Duplicate Detection"
+              aria-label="Skill name"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-[12px] text-sub">Description</span>
+            <Input.TextArea
+              value={draft.desc}
+              onChange={(e) => set({ desc: e.target.value })}
+              rows={3}
+              placeholder="What this skill does, in one or two sentences."
+              aria-label="Skill description"
+            />
+          </label>
+
+          <label className="flex items-center gap-2">
+            <Switch checked={draft.enabled} onChange={(v) => set({ enabled: v })} />
+            <span className="text-[12.5px]">{draft.enabled ? 'Enabled' : 'Disabled'}</span>
+          </label>
+
+          {error && <Alert type="error" showIcon message={error} />}
+        </div>
+      </Modal>
     </div>
   );
 }

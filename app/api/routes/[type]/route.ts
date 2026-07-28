@@ -10,3 +10,9 @@ export async function PUT(req: Request, { params }: Ctx) {
   const body = await readJson(req);
   return proxy(() => backendFetch(services.routes.update(type), { method: 'PUT', body }));
 }
+
+/** DELETE /api/routes/:type — remove a flow (the console renames by re-create). */
+export async function DELETE(_req: Request, { params }: Ctx) {
+  const { type } = await params;
+  return proxy(() => backendFetch(services.routes.remove(type), { method: 'DELETE' }));
+}

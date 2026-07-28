@@ -5,8 +5,7 @@ import {
   TRACES,
   STATUS_DEFS,
   TYPE_DEFS,
-  SKILL_DEFS,
-  NODE_SKILL_NAMES,
+  NON_NODE_SKILLS,
   DEFAULT_CHAIN,
   NODE_W,
   NODE_GAP,
@@ -18,21 +17,36 @@ import {
   type RouteDef,
 } from './data';
 import type { State } from './types';
+import type { DataActions, ServerState } from './useSignAgentData';
 
 // The vals bag is a faithful port of the original DCLogic.renderVals() output.
 // It is intentionally loosely typed (any) — it is a heterogeneous view-model.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+type SetState = (patch: Partial<State> | ((prev: State) => Partial<State>)) => void;
+
+/** Documents awaiting *this* approver — the Pending Items queue. */
+export function pendingForMe(cases: CaseItem[]): CaseItem[] {
+  return cases.filter((c) => c.status === 'pending' && c.routeIdx === 0 && !c.currentLevel2);
+}
+
+/** The pipeline whose flow is on screen; falls back to the first one loaded. */
+export function activeFlowName(state: State, flows: Record<string, RouteDef>): string {
+  return state.routeTab && flows[state.routeTab] ? state.routeTab : Object.keys(flows)[0] || '';
+}
+
 export function buildVals(
   state: State,
-  setState: (patch: Partial<State> | ((prev: State) => Partial<State>)) => void,
+  setState: SetState,
   props: { lowRiskAuto: boolean; showRisk: boolean },
+  server: ServerState,
+  actions: DataActions,
 ): any {
   const s = state;
   const { lowRiskAuto, showRisk } = props;
 
   // ---- derived cases (lowRiskAuto tweak) ----
-  const cases = s.cases.map((c) => {
+  const cases = server.cases.map((c) => {
     if (c.id === 'QC-2607' && !lowRiskAuto && c.status === 'auto') {
       return {
         ...c,
@@ -87,7 +101,8 @@ export function buildVals(
     };
   });
   const stageOf = (c: CaseItem) => {
-    if (c.status === 'pending') return `Awaiting ${c.route[c.routeIdx!].name}`;
+    const stage = c.route[c.routeIdx ?? -1];
+    if (c.status === 'pending' && stage) return `Awaiting ${stage.name}`;
     if (c.status === 'auto') return 'Agent auto-approved (auditing)';
     if (c.status === 'approved') return 'Approval complete';
     return c.lastEvent.split('·').pop()!.trim();
@@ -114,7 +129,7 @@ export function buildVals(
     });
 
   // ---- approver ----
-  const pendingMine = cases.filter((c) => c.status === 'pending' && c.routeIdx === 0 && !c.currentLevel2);
+  const pendingMine = pendingForMe(cases);
   const riskBadge = (r: CaseItem['risk']) =>
     showRisk ? riskChip(r) : { label: '', bg: 'transparent', fg: 'transparent' };
   const approverCases = pendingMine.map((c) => {
@@ -132,6 +147,8 @@ export function buildVals(
     };
   });
   const sel = pendingMine.find((c) => c.id === s.selId) || null;
+  // The pre-review report and reasoning trace are not modelled by the backend;
+  // they stay as canned per-document analysis.
   const selChecks = sel
     ? (PRECHECKS[sel.id] || PRECHECKS.default).map((c) => ({ ...c, color: c.ok ? 'var(--green)' : 'var(--amber)' }))
     : [];
@@ -139,60 +156,27 @@ export function buildVals(
   const selRb = sel ? riskBadge(sel.risk) : { label: '', bg: 'transparent', fg: 'transparent' };
 
   // ---- admin skills ----
-  const skillCards = SKILL_DEFS.map((d) => {
-    const on = s.skills[d.key];
-    return {
-      ...d,
-      on,
-      opacity: on ? 1 : 0.55,
-      toggle: (checked: boolean) => setState((st) => ({ skills: { ...st.skills, [d.key]: checked } })),
-    };
-  });
+  const skillCards = server.skills.map((d) => ({
+    ...d,
+    on: d.enabled,
+    opacity: d.enabled ? 1 : 0.55,
+    toggle: (checked: boolean) => actions.toggleSkill(d.key, checked),
+  }));
+  const existingSkillKeys = server.skills.map((d) => d.key);
 
   // ---- approve / reject ----
   const approve = () => {
+    if (!s.selId) return;
     const id = s.selId;
-    setState((st) => ({
-      rejecting: false,
-      rejectReason: '',
-      cases: st.cases.map((c) => {
-        if (c.id !== id) return c;
-        const route = c.route.map((r, i) => (i === c.routeIdx ? { ...r, state: 'done' as const } : r));
-        const nextIdx = (c.routeIdx ?? 0) + 1;
-        const finished = nextIdx >= route.length;
-        return {
-          ...c,
-          route,
-          routeIdx: nextIdx,
-          status: finished ? ('approved' as const) : ('pending' as const),
-          currentLevel2: !finished,
-          lastEvent:
-            'just now · Dep. Mgr. Lin approved' +
-            (finished ? ', approval complete' : ', routed to Design Center Assoc. Mgr. Wang'),
-        };
-      }),
-      selId: null,
-    }));
+    setState({ rejecting: false, rejectReason: '', selId: null });
+    void actions.approve(id);
   };
   const rejectConfirm = () => {
-    if (!s.rejectReason.trim()) return;
+    if (!s.selId || !s.rejectReason.trim()) return;
     const id = s.selId;
     const reason = s.rejectReason;
-    setState((st) => ({
-      rejecting: false,
-      rejectReason: '',
-      cases: st.cases.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              status: 'rejected' as const,
-              route: c.route.map((r, i) => (i === c.routeIdx ? { ...r, state: 'rejected' as const } : r)),
-              lastEvent: `just now · Dep. Mgr. Lin rejected: ${reason}`,
-            }
-          : c,
-      ),
-      selId: null,
-    }));
+    setState({ rejecting: false, rejectReason: '', selId: null });
+    void actions.reject(id, reason);
   };
 
   return {
@@ -212,7 +196,7 @@ export function buildVals(
     dashTypes,
     dashRows,
     ...modalVals(s, setState, cases, statusDefs, showRisk),
-    ...feedVals(s),
+    ...feedVals(server.activity),
     dashFiltered: !!s.dashType,
     dashFilterLabel: TYPE_DEFS.find((t) => t.name === s.dashType)?.label || s.dashType || 'All types',
     dashClear: () => setState({ dashType: null }),
@@ -255,16 +239,19 @@ export function buildVals(
 
     // skills
     skillCards,
+    existingSkillKeys,
+    skillCreate: actions.createSkill,
+    skillUpdate: actions.updateSkill,
 
     // routes
-    ...routeVals(s, setState),
+    ...routeVals(s, setState, server.flows, server.skills, actions),
   };
 }
 
 // ── modal view-model ──
 function modalVals(
   s: State,
-  setState: (patch: Partial<State> | ((prev: State) => Partial<State>)) => void,
+  setState: SetState,
   cases: CaseItem[],
   statusDefs: typeof STATUS_DEFS,
   showRisk: boolean,
@@ -342,14 +329,13 @@ function modalVals(
 }
 
 // ── activity-feed view-model ──
-function feedVals(s: State): any {
+function feedVals(activity: ServerState['activity']): any {
   const chipC: Record<string, [string, string]> = {
     accent: ['var(--accent-soft)', 'var(--accent)'],
     amber: ['var(--amber-soft)', 'var(--amber)'],
     green: ['var(--green-soft)', 'var(--green)'],
   };
-  const feed = s.feed || [];
-  const feedItems = feed.map((f) => {
+  const feedItems = activity.map((f) => {
     const cc = chipC[f.chip] || chipC.accent;
     return {
       icon: f.icon,
@@ -363,46 +349,126 @@ function feedVals(s: State): any {
   });
   return {
     feedItems,
-    feedWorkingOn: !!s.feedWorking,
-    feedWorkingLabel: s.feedWorking || '',
-    feedIdle: !s.feedWorking && feed.length > 0,
+    // Nothing reports an in-flight agent step yet, so the console shows the
+    // idle state whenever the feed is live.
+    feedWorkingOn: false,
+    feedWorkingLabel: '',
+    feedIdle: true,
   };
 }
 
 // ── routing-rules flow-canvas view-model ──
 function routeVals(
   s: State,
-  setState: (patch: Partial<State> | ((prev: State) => Partial<State>)) => void,
+  setState: SetState,
+  defs: Record<string, RouteDef>,
+  skills: ServerState['skills'],
+  actions: DataActions,
 ): any {
-  const tab = s.routeTab;
-  const on = s.routeOn[tab];
-  const G = 'var(--green)';
+  // Node bindings offer whatever skills exist on the server, minus the
+  // built-ins that do not belong to a single step.
+  const nodeSkillNames: Record<string, string> = Object.fromEntries(
+    skills.filter((sk) => !NON_NODE_SKILLS.includes(sk.key)).map((sk) => [sk.key, sk.name]),
+  );
 
-  const defs = s.routeDefs;
+  const tab = activeFlowName(s, defs);
   const D = defs[tab];
+
+  const baseTabs = Object.keys(defs).map((k) => ({
+    label: k,
+    fw: tab === k ? 700 : 400,
+    bg: tab === k ? 'var(--surface)' : 'transparent',
+    fg: tab === k ? 'var(--ink)' : 'var(--sub)',
+    pick: () => setState({ routeTab: k, routeSel: null, routeEdgeSel: null }),
+  }));
+
   const now = new Date();
   const today = `${now.getMonth() + 1}/${String(now.getDate()).padStart(2, '0')}`;
   const bump = (m: string) => m.replace(/updated [\d/]+|created today/, `updated ${today}`);
 
-  // Per-node settings are scoped to the pipeline, so two flows can name their
-  // nodes alike without sharing skill/verify configuration.
-  const nodeKey = (id: string) => `${tab}:${id}`;
+  const newFlow = (): RouteDef => ({
+    meta: 'v1 · created today · System Admin',
+    mid: ['v'],
+    high: ['v', 'd'],
+    chain: [...DEFAULT_CHAIN],
+    enabled: true,
+    nodeSkills: {},
+    nodeVerify: {},
+  });
+  const addFlow = () => {
+    let n = 4;
+    while (defs[`Pipeline${n}`]) n++;
+    const name = `Pipeline${n}`;
+    actions.createFlow(name, newFlow());
+    setState({ routeTab: name, routeSel: null, routeRenaming: true, routeNameDraft: name });
+  };
+
+  // Flows are still loading (or failed to load): render an empty canvas rather
+  // than crashing on a missing definition.
+  if (!D) {
+    return {
+      isRoutes: s.role === 'routes',
+      routeTabs: baseTabs,
+      routeMeta: '',
+      flowCanvasW: 760,
+      flowCanvasH: 166,
+      routeAddNode: () => undefined,
+      routeAddFlow: addFlow,
+      routeRenaming: false,
+      routeNotRenaming: false,
+      routeNameDraft: '',
+      routeRenameStart: () => undefined,
+      routeNameInput: () => undefined,
+      routeNameKey: () => undefined,
+      routeRenameCommit: () => undefined,
+      routeRemovedChips: [],
+      routeStateLabel: '',
+      routeStateFg: 'var(--sub)',
+      routeOn: false,
+      routeToggle: () => undefined,
+      routeCanvasOpacity: 1,
+      routeCanvasClick: () => undefined,
+      routeZoom: s.routeZoom,
+      routeZoomPct: `${Math.round(s.routeZoom * 100)}%`,
+      routeZoomIn: () => undefined,
+      routeZoomOut: () => undefined,
+      flowNodes: [],
+      flowEdges: [],
+      flowEdgeLabels: [],
+      routePanelOpen: false,
+      routePanelLeft: '14px',
+      routePanelTop: '14px',
+      routePanelTitle: '',
+      routePanelKind: '',
+      routePanelRows: [],
+      routePanelClose: () => undefined,
+    };
+  }
+
+  const on = D.enabled ?? true;
+  const G = 'var(--green)';
+
+  /** Every flow edit funnels through here, so all of them persist. */
+  const patchFlow = (patch: Partial<RouteDef>) =>
+    actions.saveFlow(tab, { ...D, ...patch, meta: bump(D.meta) });
+
+  const nodeSkills = D.nodeSkills ?? {};
+  const nodeVerify = D.nodeVerify ?? {};
 
   const skillOpts = [
     { v: '', label: '— None —' },
-    ...Object.keys(NODE_SKILL_NAMES).map((k) => ({ v: k, label: NODE_SKILL_NAMES[k] })),
+    ...Object.keys(nodeSkillNames).map((k) => ({ v: k, label: nodeSkillNames[k] })),
   ];
-  const skillOf = (id: string) => s.nodeSkills?.[nodeKey(id)] ?? '';
+  const skillOf = (id: string) => nodeSkills[id] ?? '';
   const skillRow = (id: string) => ({
     isSel: true,
     k: 'Skill',
     options: skillOpts,
     value: skillOf(id),
-    change: (e: any) =>
-      setState((st) => ({ nodeSkills: { ...st.nodeSkills, [nodeKey(id)]: e.target.value } })),
+    change: (e: any) => patchFlow({ nodeSkills: { ...nodeSkills, [id]: e.target.value } }),
   });
 
-  const verifyOn = (id: string) => s.nodeVerify?.[nodeKey(id)] ?? true;
+  const verifyOn = (id: string) => nodeVerify[id] ?? true;
   const verifyRow = (id: string) => {
     const von = verifyOn(id);
     return {
@@ -411,35 +477,21 @@ function routeVals(
       v: von ? 'Requires manual confirmation' : 'No confirmation needed',
       fg: von ? 'var(--ink)' : 'var(--sub)',
       checked: von,
-      toggle: () =>
-        setState((st) => ({
-          nodeVerify: { ...st.nodeVerify, [nodeKey(id)]: !(st.nodeVerify?.[nodeKey(id)] ?? true) },
-        })),
+      toggle: () => patchFlow({ nodeVerify: { ...nodeVerify, [id]: !von } }),
     };
   };
 
   const removed = D.removed || [];
-  const restoreNode = (id: string) =>
-    setState((st) => {
-      const d = st.routeDefs[tab];
-      return {
-        routeDefs: {
-          ...st.routeDefs,
-          [tab]: { ...d, removed: (d.removed || []).filter((x) => x !== id), meta: bump(d.meta) },
-        },
-      };
-    });
+  const restoreNode = (id: string) => patchFlow({ removed: removed.filter((x) => x !== id) });
 
   // ── node chain ──
   const chain = D.chain?.length ? D.chain : DEFAULT_CHAIN;
-  const setNodes = (mut: (arr: string[]) => void) =>
-    setState((st) => {
-      const d = st.routeDefs[tab];
-      const arr = [...(d.chain?.length ? d.chain : DEFAULT_CHAIN)];
-      mut(arr);
-      if (!arr.length) return {};
-      return { routeDefs: { ...st.routeDefs, [tab]: { ...d, chain: arr, meta: bump(d.meta) } } };
-    });
+  const setNodes = (mut: (arr: string[]) => void) => {
+    const arr = [...chain];
+    mut(arr);
+    if (!arr.length) return;
+    patchFlow({ chain: arr });
+  };
   const addNode = (at?: number) =>
     setNodes((a) => {
       let n = a.length + 1;
@@ -467,7 +519,7 @@ function routeVals(
     kind: 'step',
     glyph: String(i + 1),
     title: name,
-    sub: NODE_SKILL_NAMES[skillOf(`n${i}`)] || 'No skill assigned',
+    sub: nodeSkillNames[skillOf(`n${i}`)] || 'No skill assigned',
   }));
   const byId: Record<string, FlowNode> = {};
   nodes.forEach((n) => (byId[n.id] = n));
@@ -595,32 +647,22 @@ function routeVals(
       : { ...r, isText: true },
   );
 
-  const commitRename = () =>
-    setState((st) => {
-      const name = (st.routeNameDraft || '').trim();
-      if (!name || name === tab || st.routeDefs[name]) return { routeRenaming: false };
-      const nd: Record<string, RouteDef> = {};
-      Object.keys(st.routeDefs).forEach((k) => {
-        nd[k === tab ? name : k] = st.routeDefs[k];
-      });
-      const no = { ...st.routeOn };
-      no[name] = no[tab];
-      delete no[tab];
-      return { routeDefs: nd, routeOn: no, routeTab: name, routeRenaming: false };
-    });
+  const commitRename = () => {
+    const name = (s.routeNameDraft || '').trim();
+    if (!name || name === tab || defs[name]) {
+      setState({ routeRenaming: false });
+      return;
+    }
+    actions.renameFlow(tab, name);
+    setState({ routeTab: name, routeRenaming: false });
+  };
 
   const zoomSet = (dz: number) =>
     setState((st) => ({ routeZoom: Math.min(1.3, Math.max(0.55, Math.round((st.routeZoom + dz) * 100) / 100)) }));
 
   return {
     isRoutes: s.role === 'routes',
-    routeTabs: Object.keys(defs).map((k) => ({
-      label: k,
-      fw: tab === k ? 700 : 400,
-      bg: tab === k ? 'var(--surface)' : 'transparent',
-      fg: tab === k ? 'var(--ink)' : 'var(--sub)',
-      pick: () => setState({ routeTab: k, routeSel: null, routeEdgeSel: null }),
-    })),
+    routeTabs: baseTabs,
     routeMeta: D.meta,
     flowCanvasW: canvasW,
     flowCanvasH: canvasH,
@@ -628,28 +670,7 @@ function routeVals(
       e.stopPropagation();
       addNode();
     },
-    routeAddFlow: () =>
-      setState((st) => {
-        let n = 4;
-        while (st.routeDefs[`Pipeline${n}`]) n++;
-        const name = `Pipeline${n}`;
-        return {
-          routeDefs: {
-            ...st.routeDefs,
-            [name]: {
-              meta: 'v1 · created today · System Admin',
-              mid: ['v'],
-              high: ['v', 'd'],
-              chain: [...DEFAULT_CHAIN],
-            },
-          },
-          routeOn: { ...st.routeOn, [name]: true },
-          routeTab: name,
-          routeSel: null,
-          routeRenaming: true,
-          routeNameDraft: name,
-        };
-      }),
+    routeAddFlow: addFlow,
     routeRenaming: s.routeRenaming,
     routeNotRenaming: !s.routeRenaming,
     routeNameDraft: s.routeNameDraft,
@@ -663,7 +684,7 @@ function routeVals(
     routeStateLabel: on ? 'Rule active' : 'Disabled',
     routeStateFg: on ? G : 'var(--sub)',
     routeOn: on,
-    routeToggle: () => setState((st) => ({ routeOn: { ...st.routeOn, [tab]: !st.routeOn[tab] } })),
+    routeToggle: () => patchFlow({ enabled: !on }),
     routeCanvasOpacity: on ? 1 : 0.45,
     routeCanvasClick: () => setState({ routeSel: null, routeEdgeSel: null }),
     routeZoom: s.routeZoom,
