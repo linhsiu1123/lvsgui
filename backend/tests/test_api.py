@@ -41,6 +41,12 @@ class TestDocuments:
         docs = (await client.get("/qc/documents", params={"type": "Waiver Request"})).json()
         assert {d["id"] for d in docs} == {"QC-2605", "QC-2604"}
 
+    async def test_caps_the_response_size(self, client: AsyncClient) -> None:
+        assert len((await client.get("/qc/documents", params={"limit": 2})).json()) == 2
+        # out-of-range limits are refused rather than silently clamped
+        assert (await client.get("/qc/documents", params={"limit": 0})).status_code == 422
+        assert (await client.get("/qc/documents", params={"limit": 501})).status_code == 422
+
     async def test_fetches_one_document(self, client: AsyncClient) -> None:
         doc = (await client.get("/qc/documents/QC-2606")).json()
         assert doc["title"].startswith("Rule Deck Change RD-0981")

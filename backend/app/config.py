@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # ── Behaviour ──
     # Insert the demo fixtures when the collections are empty.
     seed_on_startup: bool = True
+    # Days to keep activity-feed entries. 0 keeps them forever; any positive
+    # value installs a TTL index so MongoDB expires them. Opt-in, because
+    # turning it on starts deleting data.
+    activity_retention_days: int = 0
     # Origins allowed to call this API directly (the Next.js proxy is server-
     # side and needs none of these; useful when hitting the API from a browser).
     cors_origins: list[str] = []

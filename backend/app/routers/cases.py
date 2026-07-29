@@ -53,9 +53,11 @@ async def list_cases(
     database: Database,
     _: CurrentPrincipal,
     type: str | None = Query(default=None, description="Filter by product type"),
+    limit: int = Query(default=200, ge=1, le=500, description="Maximum documents to return"),
 ) -> list[CaseItem]:
+    """Newest first. Bounded — an unbounded list would grow with the archive."""
     query = {"type": type} if type else {}
-    cursor = database[CASES].find(query, projection={"_id": False}).sort("submittedAt", -1)
+    cursor = database[CASES].find(query, projection={"_id": False}).sort("submittedAt", -1).limit(limit)
     return [CaseItem.model_validate(doc) async for doc in cursor]
 
 

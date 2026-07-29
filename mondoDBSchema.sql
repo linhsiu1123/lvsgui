@@ -73,18 +73,23 @@ CREATE TABLE cases (
     -- the "awaiting me" filter on the Pending Items queue.
     "currentLevel2" BOOLEAN          NULL,
 
-    -- Human-readable audit line, rebuilt on every transition.
-    -- 'Today 14:39 · Debug User approved, approval complete'
-    "lastEvent"     TEXT         NOT NULL,
+    -- Audit line, stored WITHOUT any rendered timestamp.
+    -- 'Debug User approved, approval complete'
+    "lastEventText" TEXT         NOT NULL,
+    -- When that event happened. The API composes
+    -- "<rendered lastEventAt> · <lastEventText>" at read time.
+    "lastEventAt"   TIMESTAMPTZ      NULL,
 
-    -- Pre-rendered display string ('Today 09:12' / 'Yesterday 16:40' /
-    -- '7/03 11:05'). Denormalised on write so the client renders no dates.
-    -- Do NOT sort or filter on this — use submittedAt.
-    "time"          VARCHAR(32)  NOT NULL,
-
-    -- The real timestamp. Stored as a tz-aware BSON date; this is what
-    -- the list endpoint sorts on (descending).
+    -- The real submission timestamp. Stored as a tz-aware BSON date; this is
+    -- what the list endpoint sorts on (descending), and what the API renders
+    -- into the relative `time` string it returns.
     "submittedAt"   TIMESTAMPTZ      NULL,
+
+    -- NOTE  There is deliberately no stored `time` or `lastEvent` column.
+    --       Earlier versions persisted the rendered strings ("Today 09:12"),
+    --       which silently became wrong the moment the day rolled over. Both
+    --       are now derived on read from the timestamps above; see
+    --       app/formatting.py and the computed fields in app/models.py.
 
     CONSTRAINT pk_cases PRIMARY KEY (id),
     CONSTRAINT ck_cases_risk   CHECK (risk   IN ('Low', 'Medium', 'High')),
@@ -261,8 +266,8 @@ CREATE TABLE activity (
     chip      VARCHAR(16) NOT NULL,   -- colour role, not a colour value
     text      TEXT        NOT NULL,   -- 'QC-2606 approved by Debug User'
     sub       TEXT        NOT NULL,   -- secondary line; '' when there is none
-    "time"    VARCHAR(16) NOT NULL,   -- pre-rendered 'HH:MM' for display
-    at        TIMESTAMPTZ     NULL,   -- real timestamp; the sort key
+    at        TIMESTAMPTZ     NULL,   -- real timestamp; sort key, and the
+                                      -- source of the 'HH:MM' the API returns
 
     CONSTRAINT pk_activity PRIMARY KEY (event_id),
     CONSTRAINT ck_activity_chip CHECK (chip IN ('accent', 'amber', 'green'))
@@ -276,19 +281,13 @@ CREATE INDEX ix_activity_at_desc ON activity (at DESC);
 --  DATA NOTES — observed in the live database, not just the model
 -- =====================================================================
 --
---  1. PARTIALLY POPULATED FIELDS
+--  1. PARTIALLY POPULATED FIELDS — RESOLVED
 --     `enabled`, `nodeSkills` and `nodeVerify` were added to RouteDef
---     after the demo data was first seeded. Seeding only fills EMPTY
---     collections, so it never backfilled them: at time of writing only
---     1 of 4 routing_flows documents carries these fields. The
---     application tolerates this by defaulting (enabled -> true,
---     verify -> true, skill -> none), which is why nothing is visibly
---     broken. A backfill would remove the divergence:
---
---         db.routing_flows.updateMany(
---           { enabled: { $exists: false } },
---           { $set: { enabled: true, nodeSkills: {}, nodeVerify: {} } }
---         )
+--     after the demo data was first seeded, and seeding only fills EMPTY
+--     collections, so older pipelines lacked them. This is now handled by
+--     `backfill_flow_defaults` in app/migrations.py, which runs at every
+--     startup and is idempotent. New fields added later should get a
+--     migration there rather than relying on reader-side defaults.
 --
 --  2. POSITIONAL NODE IDS
 --     nodeSkills/nodeVerify are keyed 'n0', 'n1', ... by CHAIN POSITION,
@@ -297,22 +296,31 @@ CREATE INDEX ix_activity_at_desc ON activity (at DESC);
 --     safe; reordering is not. Giving nodes real ids would fix this and
 --     is the single most valuable change to this schema.
 --
---  3. UNBOUNDED GROWTH
---     `activity` has no retention policy and no TTL index. For a
---     long-running deployment add one, e.g. 90 days:
+--  3. UNBOUNDED GROWTH — OPT-IN CONTROL
+--     `activity` is append-only. Retention is off by default (keeping
+--     history is the safer default); set ACTIVITY_RETENTION_DAYS to a
+--     positive number and app/db.py installs a TTL index on `at`, after
+--     which MongoDB expires older entries. Turning it on deletes data.
 --
---         db.activity.createIndex({ at: 1 }, { expireAfterSeconds: 7776000 })
---
---  4. DENORMALISED DISPLAY STRINGS
---     cases."time", activity."time" and routing_flows.meta are rendered
---     server-side and stored. They are presentation, not data: never
---     sort, filter or join on them. cases."submittedAt" and activity.at
---     are the real temporal columns.
+--  4. DENORMALISED DISPLAY STRINGS — LARGELY RESOLVED
+--     cases."time"/"lastEvent" and activity."time" used to be stored and
+--     went stale as soon as the day changed. They are now derived on read
+--     from "submittedAt"/"lastEventAt"/"at" and are not columns any more.
+--     routing_flows.meta is still a stored free-text provenance line: it
+--     is authored text, not a rendered timestamp, so it does not rot the
+--     same way — but never sort or filter on it.
 --
 --  5. NO CROSS-DOCUMENT TRANSACTIONS
 --     Approving a case writes the case document and appends an activity
 --     event as two separate operations, outside a transaction. A crash
 --     between them loses the feed entry while the approval stands. This
---     is acceptable because the feed is advisory and cases."lastEvent"
---     carries the authoritative audit line.
+--     is acceptable because the feed is advisory and the case's own
+--     lastEventText/lastEventAt carry the authoritative audit line.
+--
+--  6. OPTIMISTIC CONCURRENCY ON DECISIONS
+--     Approve/reject is read-modify-write. The write filters on the
+--     (status, routeIdx) pair that was read, so a second approver racing
+--     on the same stage matches no document and gets 409 rather than
+--     silently overwriting the first decision. Any new mutation of
+--     `cases` should follow the same pattern.
 -- =====================================================================

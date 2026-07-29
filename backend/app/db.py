@@ -40,7 +40,7 @@ async def connect(settings: Settings) -> AsyncDatabase[dict[str, Any]]:
     )
     database = _client[settings.mongodb_db]
     try:
-        await ensure_indexes(database)
+        await ensure_indexes(database, settings)
     except ServerSelectionTimeoutError as exc:
         await disconnect()
         raise RuntimeError(
@@ -58,7 +58,7 @@ async def disconnect() -> None:
         _client = None
 
 
-async def ensure_indexes(database: AsyncDatabase[dict[str, Any]]) -> None:
+async def ensure_indexes(database: AsyncDatabase[dict[str, Any]], settings: Settings) -> None:
     # `id` is the business key the UI uses (QC-2606), not Mongo's _id.
     await database[CASES].create_index("id", unique=True)
     await database[CASES].create_index("type")
@@ -66,6 +66,16 @@ async def ensure_indexes(database: AsyncDatabase[dict[str, Any]]) -> None:
     await database[SKILLS].create_index("key", unique=True)
     # Feed is always read newest-first.
     await database[ACTIVITY].create_index([("at", -1)])
+
+    # Retention is opt-in: without it the feed grows without bound, but turning
+    # it on deletes history, so it only happens when explicitly configured.
+    if settings.activity_retention_days > 0:
+        await database[ACTIVITY].create_index(
+            "at",
+            name="activity_ttl",
+            expireAfterSeconds=settings.activity_retention_days * 86_400,
+        )
+        log.info("Activity feed retention: %d days", settings.activity_retention_days)
 
 
 def get_database() -> AsyncDatabase[dict[str, Any]]:

@@ -11,4 +11,8 @@
 next-env.d.ts
 *.tsbuildinfo
 .DS_Store
-.omc/*
+
+# Tooling state. `.omc/*` contains a slash, so git anchors it to this
+# directory and it misses nested copies such as backend/.omc — hence the
+# unanchored form.
+.omc/
