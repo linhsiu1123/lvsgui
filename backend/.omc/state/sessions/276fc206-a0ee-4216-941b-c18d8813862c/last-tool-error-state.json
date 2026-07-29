@@ -1,7 +1,0 @@
-{
-  "tool_name": "PowerShell",
-  "tool_input_preview": "{\"command\":\"cd 'C:\\\\Users\\\\ao317\\\\Documents\\\\code\\\\lvsgui\\\\backend'\\n& '.\\\\.venv\\\\Scripts\\\\python.exe' -m pytest -q 2>&1 | Select-String -Pattern 'passed|failed|Error|error:|E   ' | Select-Object -Fir...",
-  "error": "Exit code 2\n=================================== ERRORS ====================================\r\n____________________ ERROR collecting tests/test_domain.py ____________________\r\nImportError while importing test module 'C:\\Users\\ao317\\Documents\\code\\lvsgui\\backend\\tests\\test_domain.py'.\r\n    from app.domain import ApprovalError, approve, approval_event, display_time, reject\r\nE   ImportError: cannot import name 'display_time' from 'app.domain' (C:\\Users\\ao317\\Documents\\code\\lvsgui\\backend\\app\\\r\ndomain...",
-  "timestamp": "2026-07-29T00:27:57.043Z",
-  "retry_count": 1
-}
