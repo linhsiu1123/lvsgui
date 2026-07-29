@@ -19,7 +19,7 @@ jest.mock('@/lib/api-client', () => ({
   api: {
     cases: { list: jest.fn(), get: jest.fn(), approve: jest.fn(), reject: jest.fn() },
     routes: { list: jest.fn(), update: jest.fn(), remove: jest.fn() },
-    skills: { list: jest.fn(), toggle: jest.fn() },
+    skills: { list: jest.fn(), create: jest.fn(), update: jest.fn(), toggle: jest.fn() },
     activity: { list: jest.fn() },
   },
 }));
@@ -29,7 +29,7 @@ jest.mock('@/lib/api-client', () => ({
 const mocked = api as unknown as {
   cases: { list: jest.Mock; get: jest.Mock; approve: jest.Mock; reject: jest.Mock };
   routes: { list: jest.Mock; update: jest.Mock; remove: jest.Mock };
-  skills: { list: jest.Mock; toggle: jest.Mock };
+  skills: { list: jest.Mock; create: jest.Mock; update: jest.Mock; toggle: jest.Mock };
   activity: { list: jest.Mock };
 };
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -229,6 +229,104 @@ describe('SignAgentCore — Skills', () => {
   });
 });
 
+describe('SignAgentCore — creating and editing skills', () => {
+  const NEW_SKILL = {
+    key: 'duplicate-check',
+    glyph: 'DC',
+    name: 'Duplicate Detection',
+    desc: 'Flags documents that repeat a recent submission.',
+    enabled: true,
+  };
+
+  async function openNewSkillDialog() {
+    await renderConsole();
+    goto('Skills');
+    fireEvent.click(screen.getByRole('button', { name: /New skill/ }));
+  }
+
+  function fill(fields: Partial<typeof NEW_SKILL>) {
+    const byLabel: Record<string, string> = {
+      key: 'Skill key',
+      glyph: 'Skill badge',
+      name: 'Skill name',
+      desc: 'Skill description',
+    };
+    Object.entries(fields).forEach(([field, value]) => {
+      if (field === 'enabled') return;
+      fireEvent.change(screen.getByLabelText(byLabel[field]), { target: { value } });
+    });
+  }
+
+  it('creates a skill and shows it among the cards', async () => {
+    mocked.skills.create.mockResolvedValue(NEW_SKILL);
+
+    await openNewSkillDialog();
+    fill(NEW_SKILL);
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(mocked.skills.create).toHaveBeenCalledWith(NEW_SKILL));
+    expect(await screen.findByText('Duplicate Detection')).toBeInTheDocument();
+  });
+
+  it('validates the key locally before calling the server', async () => {
+    await openNewSkillDialog();
+    fill({ ...NEW_SKILL, key: 'Not A Slug' });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(await screen.findByText(/Key must be lowercase/)).toBeInTheDocument();
+    expect(mocked.skills.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a key that is already taken, without a round trip', async () => {
+    await openNewSkillDialog();
+    fill({ ...NEW_SKILL, key: 'route' });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(await screen.findByText(/already exists/)).toBeInTheDocument();
+    expect(mocked.skills.create).not.toHaveBeenCalled();
+  });
+
+  it('requires every field', async () => {
+    await openNewSkillDialog();
+    fill({ key: 'ok-key', glyph: 'OK', name: 'Named' }); // no description
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(await screen.findByText('A description is required.')).toBeInTheDocument();
+    expect(mocked.skills.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps the dialog open and reports a server-side rejection', async () => {
+    mocked.skills.create.mockRejectedValue(new Error('already exists upstream'));
+
+    await openNewSkillDialog();
+    fill(NEW_SKILL);
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(await screen.findByText('already exists upstream')).toBeInTheDocument();
+    // still editable rather than dismissed
+    expect(screen.getByLabelText('Skill name')).toBeInTheDocument();
+  });
+
+  it('edits an existing skill and leaves its key alone', async () => {
+    mocked.skills.update.mockResolvedValue({ ...SKILLS[0], name: 'Smart Routing' });
+
+    await renderConsole();
+    goto('Skills');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Routing Decision' }));
+
+    // the key is shown but locked — flow nodes are bound to it
+    expect(screen.getByLabelText('Skill key')).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Skill name'), { target: { value: 'Smart Routing' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(mocked.skills.update).toHaveBeenCalledWith('route', expect.objectContaining({ name: 'Smart Routing' })),
+    );
+    expect(await screen.findByText('Smart Routing')).toBeInTheDocument();
+  });
+});
+
 describe('SignAgentCore — Routing rules canvas', () => {
   async function openRoutes() {
     await renderConsole();
@@ -240,6 +338,23 @@ describe('SignAgentCore — Routing rules canvas', () => {
     ['node1', 'node2', 'node3'].forEach((n) => expect(screen.getByText(n)).toBeInTheDocument());
     expect(screen.getAllByText('No skill assigned')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Pipeline1' })).toBeInTheDocument();
+  });
+
+  it('labels a bound node with the skill name the server reported', async () => {
+    // Node skill names are derived from /api/skills, not a hardcoded map, so
+    // operator-created skills show up on the canvas too.
+    mocked.skills.list.mockResolvedValue([
+      ...clone(SKILLS),
+      { key: 'duplicate-check', glyph: 'DC', name: 'Duplicate Detection', desc: 'Finds repeats.', enabled: true },
+    ]);
+    mocked.routes.list.mockResolvedValue({
+      ...clone(FLOWS),
+      Pipeline1: { ...clone(FLOWS.Pipeline1), nodeSkills: { n0: 'duplicate-check' } },
+    });
+
+    await openRoutes();
+    expect(screen.getByText('Duplicate Detection')).toBeInTheDocument();
+    expect(screen.getAllByText('No skill assigned')).toHaveLength(2);
   });
 
   it('opens the config panel for the selected node', async () => {

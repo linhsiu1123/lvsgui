@@ -10,8 +10,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 from pydantic.alias_generators import to_camel
+
+from .formatting import clock, display_time
 
 RiskLevel = Literal["Low", "Medium", "High"]
 CaseStatus = Literal["auto", "pending", "approved", "rejected"]
@@ -44,11 +46,34 @@ class CaseItem(ApiModel):
     route: list[RouteStep] = Field(default_factory=list)
     route_idx: int | None = None
     current_level2: bool | None = None
-    last_event: str = ""
-    # Display string the UI renders as-is ("Today 09:12"), derived from
-    # `submitted_at` when a document is created.
-    time: str = ""
     submitted_at: datetime | None = None
+
+    # Audit line, stored WITHOUT a rendered time so it never goes stale.
+    last_event_text: str = ""
+    last_event_at: datetime | None = None
+
+    # ── derived on read, never stored (see PERSIST_EXCLUDE) ──
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def time(self) -> str:
+        """Relative submission time, as the console shows it."""
+        return display_time(self.submitted_at) if self.submitted_at else ""
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def last_event(self) -> str:
+        """The audit line with its timestamp rendered fresh."""
+        if not self.last_event_text:
+            return ""
+        if self.last_event_at is None:
+            return self.last_event_text
+        return f"{display_time(self.last_event_at)} · {self.last_event_text}"
+
+
+# Computed fields must not be written back to MongoDB — storing them is what
+# froze the display strings in the first place.
+CASE_PERSIST_EXCLUDE = {"time", "last_event"}
 
 
 class RejectRequest(ApiModel):
@@ -121,5 +146,12 @@ class ActivityItem(ApiModel):
     chip: ChipColour
     text: str
     sub: str = ""
-    time: str = ""
     at: datetime | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def time(self) -> str:
+        return clock(self.at) if self.at else ""
+
+
+ACTIVITY_PERSIST_EXCLUDE = {"time"}

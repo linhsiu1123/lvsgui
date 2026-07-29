@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { Alert, Avatar, Input, Modal, Select, Skeleton, Switch, Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 

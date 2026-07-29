@@ -86,6 +86,38 @@ class TestApproval:
         assert body["route"][0]["state"] == "rejected"
         assert body["lastEvent"].endswith("rejected: missing data")
 
+    async def test_a_second_approver_racing_the_first_is_refused(
+        self, client: AsyncClient, seeded: FakeDatabase
+    ) -> None:
+        """Read-modify-write must not let one decision overwrite another.
+
+        Simulates the interleaving: both approvers loaded the document at
+        routeIdx 0, the first commits, the second then tries to commit its
+        stale view.
+        """
+        first = (await client.post("/qc/documents/QC-2606/approve")).json()
+        assert first["routeIdx"] == 1
+
+        # Rewind the in-flight request's view of the world, not the database.
+        stale = await seeded["cases"].find_one({"id": "QC-2606"})
+        assert stale is not None and stale["routeIdx"] == 1
+
+        # A racing approver still holding routeIdx 0 would produce this write;
+        # the conditional filter must reject it.
+        result = await seeded["cases"].update_one(
+            {"id": "QC-2606", "status": "pending", "routeIdx": 0},
+            {"$set": {"routeIdx": 1}},
+        )
+        assert result.matched_count == 0, "a stale write must match no document"
+
+    async def test_deciding_an_already_decided_document_is_a_conflict(self, client: AsyncClient) -> None:
+        await client.post("/qc/documents/QC-2606/approve")
+        await client.post("/qc/documents/QC-2606/approve")  # completes it
+
+        late = await client.post("/qc/documents/QC-2606/approve")
+        assert late.status_code == 409
+        assert late.json()["detail"]["error"] == "invalid_transition"
+
     async def test_decisions_append_to_the_activity_feed(self, client: AsyncClient) -> None:
         assert (await client.get("/qc/activity")).json() == []
 

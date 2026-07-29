@@ -25,21 +25,6 @@ class ApprovalError(Exception):
         self.status_code = status_code
 
 
-def display_time(at: datetime, *, now: datetime | None = None) -> str:
-    """Render a timestamp the way the console shows it.
-
-    Today -> "Today 09:12", yesterday -> "Yesterday 16:40", older -> "7/03 11:05".
-    """
-    now = now or datetime.now(tz=at.tzinfo)
-    delta_days = (now.date() - at.date()).days
-    clock = at.strftime("%H:%M")
-    if delta_days == 0:
-        return f"Today {clock}"
-    if delta_days == 1:
-        return f"Yesterday {clock}"
-    return f"{at.month}/{at.day:02d} {clock}"
-
-
 def current_stage(case: CaseItem) -> RouteStep | None:
     """The stage awaiting a decision, or None when there is nothing pending."""
     if case.status != "pending" or case.route_idx is None:
@@ -77,7 +62,8 @@ def approve(case: CaseItem, *, approver: str, at: datetime) -> CaseItem:
             "route_idx": next_idx,
             "status": "approved" if finished else "pending",
             "current_level2": not finished,
-            "last_event": f"{display_time(at)} · {approver} approved, {tail}",
+            "last_event_text": f"{approver} approved, {tail}",
+            "last_event_at": at,
         }
     )
 
@@ -98,7 +84,8 @@ def reject(case: CaseItem, *, approver: str, reason: str, at: datetime) -> CaseI
             "route": route,
             "status": "rejected",
             "current_level2": False,
-            "last_event": f"{display_time(at)} · {approver} rejected: {reason}",
+            "last_event_text": f"{approver} rejected: {reason}",
+            "last_event_at": at,
         }
     )
 
@@ -111,7 +98,6 @@ def approval_event(case: CaseItem, *, approver: str, at: datetime) -> ActivityIt
         chip="green" if finished else "accent",
         text=f"{case.id} approved by {approver}",
         sub="Approval complete" if finished else f"Routed to {case.route[case.route_idx or 0].name}",
-        time=at.strftime("%H:%M"),
         at=at,
     )
 
@@ -122,6 +108,5 @@ def rejection_event(case: CaseItem, *, approver: str, reason: str, at: datetime)
         chip="amber",
         text=f"{case.id} rejected by {approver}",
         sub=reason,
-        time=at.strftime("%H:%M"),
         at=at,
     )

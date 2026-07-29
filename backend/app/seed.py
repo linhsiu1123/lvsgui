@@ -16,8 +16,7 @@ from typing import Any
 from pymongo.asynchronous.database import AsyncDatabase
 
 from .db import CASES, ROUTING_FLOWS, SKILLS
-from .domain import display_time
-from .models import CaseItem, RouteDef, RouteStep, SkillDef
+from .models import CASE_PERSIST_EXCLUDE, CaseItem, RouteDef, RouteStep, SkillDef
 
 log = logging.getLogger(__name__)
 
@@ -34,8 +33,10 @@ def _at(days_ago: int, hour: int, minute: int) -> datetime:
 
 def seed_cases() -> list[CaseItem]:
     def case(**kw: Any) -> CaseItem:
+        # The last event for seeded documents is their submission; display
+        # strings are derived on read, so nothing about time is stored here.
         submitted_at: datetime = kw.pop("submitted_at")
-        return CaseItem(submitted_at=submitted_at, time=display_time(submitted_at), **kw)
+        return CaseItem(submitted_at=submitted_at, last_event_at=submitted_at, **kw)
 
     return [
         case(
@@ -48,7 +49,7 @@ def seed_cases() -> list[CaseItem]:
             risk="Low",
             status="auto",
             route=[RouteStep(name="Agent Auto-approve", state="done")],
-            last_event="Agent pre-review passed, auto-approved by low-risk rule",
+            last_event_text="Agent pre-review passed, auto-approved by low-risk rule",
         ),
         case(
             id="QC-2606",
@@ -61,7 +62,7 @@ def seed_cases() -> list[CaseItem]:
             status="pending",
             route_idx=0,
             route=[RouteStep(name=LIN), RouteStep(name=WANG)],
-            last_event=f"Agent pre-review done, routed to {LIN}",
+            last_event_text=f"Agent pre-review done, routed to {LIN}",
         ),
         case(
             id="QC-2605",
@@ -74,7 +75,7 @@ def seed_cases() -> list[CaseItem]:
             status="pending",
             route_idx=0,
             route=[RouteStep(name=LIN)],
-            last_event="Agent detected an open linked ECO",
+            last_event_text="Agent detected an open linked ECO",
         ),
         case(
             id="QC-2604",
@@ -87,7 +88,7 @@ def seed_cases() -> list[CaseItem]:
             status="rejected",
             route_idx=0,
             route=[RouteStep(name=LIN, state="rejected")],
-            last_event="Dep. Mgr. Lin rejected: false-alarm root-cause analysis lacks evidence",
+            last_event_text="Dep. Mgr. Lin rejected: false-alarm root-cause analysis lacks evidence",
         ),
         case(
             id="QC-2603",
@@ -99,7 +100,7 @@ def seed_cases() -> list[CaseItem]:
             risk="Low",
             status="auto",
             route=[RouteStep(name="Agent Auto-approve", state="done")],
-            last_event="Agent pre-review passed, auto-approved",
+            last_event_text="Agent pre-review passed, auto-approved",
         ),
         case(
             id="QC-2602",
@@ -112,7 +113,7 @@ def seed_cases() -> list[CaseItem]:
             status="approved",
             route_idx=2,
             route=[RouteStep(name=LIN, state="done"), RouteStep(name=WANG, state="done")],
-            last_event="Assoc. Mgr. Wang approved, approval complete",
+            last_event_text="Assoc. Mgr. Wang approved, approval complete",
         ),
     ]
 
@@ -165,7 +166,7 @@ def seed_skills() -> list[SkillDef]:
 async def seed_if_empty(database: AsyncDatabase[dict[str, Any]]) -> None:
     """Populate empty collections. A no-op once anything is stored."""
     if await database[CASES].count_documents({}, limit=1) == 0:
-        await database[CASES].insert_many([c.model_dump(by_alias=True) for c in seed_cases()])
+        await database[CASES].insert_many([c.model_dump(by_alias=True, exclude=CASE_PERSIST_EXCLUDE) for c in seed_cases()])
         log.info("Seeded demo approval documents")
 
     if await database[ROUTING_FLOWS].count_documents({}, limit=1) == 0:

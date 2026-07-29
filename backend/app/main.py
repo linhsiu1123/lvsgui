@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 
 from . import db
 from .config import Settings, get_settings
+from .migrations import run_all as run_migrations
 from .routers import activity, cases, routing_flows, skills
 from .seed import seed_if_empty
 
@@ -40,6 +41,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     database = await db.connect(settings)
     if settings.seed_on_startup:
         await seed_if_empty(database)
+    # After seeding, so a fresh database skips straight through.
+    await run_migrations(database)
     try:
         yield
     finally:

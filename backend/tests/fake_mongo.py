@@ -13,8 +13,14 @@ from typing import Any, AsyncIterator, Iterable
 
 
 def _matches(doc: dict[str, Any], query: dict[str, Any]) -> bool:
-    """Equality-only matching — the app never issues operators in filters."""
+    """Equality matching, plus the one operator the migrations use."""
     for key, expected in query.items():
+        if isinstance(expected, dict):
+            if set(expected) != {"$exists"}:
+                raise NotImplementedError(f"FakeCollection cannot match {key}={expected!r}")
+            if (key in doc) is not expected["$exists"]:
+                return False
+            continue
         if not isinstance(expected, (str, int, float, bool, type(None))):
             raise NotImplementedError(f"FakeCollection cannot match {key}={expected!r}")
         if doc.get(key) != expected:
@@ -90,10 +96,12 @@ class FakeCollection:
         self.docs.extend(copy.deepcopy(d) for d in docs)
 
     def _apply(self, doc: dict[str, Any], update: dict[str, Any]) -> None:
-        unsupported = set(update) - {"$set"}
+        unsupported = set(update) - {"$set", "$unset"}
         if unsupported:
-            raise NotImplementedError(f"FakeCollection supports only $set, got {unsupported}")
+            raise NotImplementedError(f"FakeCollection supports only $set/$unset, got {unsupported}")
         doc.update(copy.deepcopy(update.get("$set", {})))
+        for field in update.get("$unset", {}):
+            doc.pop(field, None)
 
     async def update_one(
         self, query: dict[str, Any], update: dict[str, Any], upsert: bool = False
@@ -108,6 +116,14 @@ class FakeCollection:
             self.docs.append(fresh)
             return FakeUpdateResult(0, 0)
         return FakeUpdateResult(0, 0)
+
+    async def update_many(self, query: dict[str, Any], update: dict[str, Any]) -> FakeUpdateResult:
+        touched = 0
+        for doc in self.docs:
+            if _matches(doc, query):
+                self._apply(doc, update)
+                touched += 1
+        return FakeUpdateResult(touched, touched)
 
     async def find_one_and_update(
         self,

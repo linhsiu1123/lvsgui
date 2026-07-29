@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.domain import ApprovalError, approve, approval_event, display_time, reject
+from app.domain import ApprovalError, approve, approval_event, reject
+from app.formatting import display_time, strip_time_prefix
 from app.models import CaseItem, RouteStep
 
 NOW = datetime(2026, 7, 28, 14, 30, tzinfo=timezone.utc)

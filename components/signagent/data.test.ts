@@ -8,8 +8,7 @@ import {
   SUGGESTIONS,
   TRACES,
   DEFAULT_CHAIN,
-  SKILL_NAMES,
-  NODE_SKILL_NAMES,
+  NON_NODE_SKILLS,
   STATUS_DEFS,
   TYPE_DEFS,
   riskChip,
@@ -69,9 +68,10 @@ describe('pre-review / suggestion / trace maps', () => {
 });
 
 describe('skills + types', () => {
-  it('offers every skill but Anomaly Detection to flow nodes', () => {
-    expect(Object.keys(NODE_SKILL_NAMES)).toEqual(['route', 'precheck', 'auto']);
-    Object.entries(NODE_SKILL_NAMES).forEach(([k, name]) => expect(SKILL_NAMES[k]).toBe(name));
+  it('withholds only the queue-wide built-in from flow-node binding', () => {
+    // The catalogue itself now comes from the backend; this list is the single
+    // rule the canvas applies on top of it.
+    expect(NON_NODE_SKILLS).toEqual(['anomaly']);
   });
 
   it('exposes the three product types and their pipelines', () => {
