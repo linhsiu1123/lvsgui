@@ -1,6 +1,9 @@
 import { services } from '@/config/services';
 import { backendFetch } from '@/lib/backend';
 import { proxy, readJson } from '@/lib/api';
+import { isMockDataEnabled } from '@/config/api-mode';
+import { mockBackend } from '@/lib/mock/backend';
+import type { SkillDef } from '@/components/signagent/data';
 
 type Ctx = { params: Promise<{ key: string }> };
 
@@ -14,6 +17,8 @@ type Ctx = { params: Promise<{ key: string }> };
  */
 export async function PATCH(req: Request, { params }: Ctx) {
   const { key } = await params;
-  const body = await readJson(req);
-  return proxy(() => backendFetch(services.skills.toggle(key), { method: 'PATCH', body }));
+  const body = await readJson<Partial<Omit<SkillDef, 'key'>>>(req);
+  return proxy(() =>
+    isMockDataEnabled() ? mockBackend.skills.toggle(key, body) : backendFetch(services.skills.toggle(key), { method: 'PATCH', body }),
+  );
 }

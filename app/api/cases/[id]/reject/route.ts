@@ -1,6 +1,8 @@
 import { services } from '@/config/services';
 import { backendFetch } from '@/lib/backend';
 import { proxy, readJson } from '@/lib/api';
+import { isMockDataEnabled } from '@/config/api-mode';
+import { mockBackend } from '@/lib/mock/backend';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -8,5 +10,9 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function POST(req: Request, { params }: Ctx) {
   const { id } = await params;
   const { reason } = await readJson<{ reason?: string }>(req);
-  return proxy(() => backendFetch(services.cases.reject(id), { method: 'POST', body: { reason } }));
+  return proxy(() =>
+    isMockDataEnabled()
+      ? mockBackend.cases.reject(id, reason ?? '')
+      : backendFetch(services.cases.reject(id), { method: 'POST', body: { reason } }),
+  );
 }
